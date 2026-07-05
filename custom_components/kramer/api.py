@@ -89,6 +89,14 @@ class KramerApiClient:
             LOGGER.warning(msg)
             raise KramerApiClientError(msg) from exception
 
+    def update_selected_source(self, source: str) -> None:
+        """Update the cached selected source from listener feedback."""
+        LOGGER.debug(
+            "Kramer API: selected source updated to %s by listener",
+            source,
+        )
+        self._attr_selected_source = source
+
     @property
     def state(self) -> KramerApiState:
         """Current device state serialized to a dictionary."""

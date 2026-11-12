@@ -142,7 +142,7 @@ class KramerListener:
             packet.hex(),
         )
 
-        instruction = packet[0]
+        instruction = packet[0] & 0x3F
         if instruction != 0x01:
             # Not a switch instruction — ignore
             LOGGER.debug(

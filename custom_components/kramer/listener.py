@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 from typing import Callable
 
 from .const import LOGGER
 
-# Protocol 2000 constants
 _PACKET_SIZE = 4
 _RECONNECT_DELAY = 5  # seconds between reconnection attempts
+_CONNECT_TIMEOUT = 10  # seconds to wait for a connection to open
+_INSTRUCTION_SWITCH_VIDEO = 0x01
+
 
 class KramerListener:
     """
@@ -59,107 +62,144 @@ class KramerListener:
         )
 
     async def _listen_loop(self) -> None:
-        """
-        Outer loop: connects and reconnects indefinitely until stopped.
-        All failure modes — lost power on the Kramer unit, lost power
-        on the ES-257, network interruption — are handled here by
-        waiting briefly and retrying.
-        """
+        """Connect and reconnect indefinitely until stopped."""
         while self._running:
             try:
                 await self._connect_and_listen()
             except asyncio.CancelledError:
-                # Listener is being stopped intentionally
                 raise
             except Exception as exc:
                 if not self._running:
                     break
                 LOGGER.debug(
-                    "Kramer listener connection lost for %s:%s (%s) — "
-                    "retrying in %s seconds",
+                    "Kramer listener connection lost for %s:%s (%s)",
                     self._ip_address,
                     self._port,
                     exc,
+                )
+            if self._running:
+                LOGGER.debug(
+                    "Kramer listener retrying %s:%s in %s seconds",
+                    self._ip_address,
+                    self._port,
                     _RECONNECT_DELAY,
                 )
                 await asyncio.sleep(_RECONNECT_DELAY)
 
     async def _connect_and_listen(self) -> None:
-        """
-        Inner loop: opens a TCP connection and reads incoming bytes.
-        Exits if the connection drops, which causes the outer loop
-        to reconnect.
-        """
+        """Open a connection and read until it drops."""
         LOGGER.debug(
             "Kramer listener connecting to %s:%s",
             self._ip_address,
             self._port,
         )
-        reader, _ = await asyncio.open_connection(
-            self._ip_address, self._port
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(self._ip_address, self._port),
+            timeout=_CONNECT_TIMEOUT,
         )
-        LOGGER.debug(
-            "Kramer listener connected to %s:%s",
-            self._ip_address,
-            self._port,
-        )
+        try:
+            self._enable_keepalive(writer)
+            LOGGER.debug(
+                "Kramer listener connected to %s:%s",
+                self._ip_address,
+                self._port,
+            )
 
-        buffer = bytearray()
+            buffer = bytearray()
+            while self._running:
+                chunk = await reader.read(64)
+                if not chunk:
+                    LOGGER.debug(
+                        "Kramer listener: connection closed by remote "
+                        "device at %s:%s",
+                        self._ip_address,
+                        self._port,
+                    )
+                    return
+                buffer.extend(chunk)
+                self._process_buffer(buffer)
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:  # noqa: BLE001
+                pass
 
-        while self._running:
-            chunk = await reader.read(64)
-            if not chunk:
-                # Zero bytes means the remote end closed the connection
+    @staticmethod
+    def _enable_keepalive(writer: asyncio.StreamWriter) -> None:
+        """Make a silently dead connection (power loss) detectable."""
+        sock = writer.get_extra_info("socket")
+        if sock is None:
+            return
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            if hasattr(socket, "TCP_KEEPIDLE"):
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+            if hasattr(socket, "TCP_KEEPINTVL"):
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
+            if hasattr(socket, "TCP_KEEPCNT"):
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+        except OSError as exc:
+            LOGGER.debug("Kramer listener: could not set keepalive (%s)", exc)
+
+    def _process_buffer(self, buffer: bytearray) -> None:
+        """
+        Split the buffer into 4-byte packets. The first byte of a packet
+        has its top bit clear and the other three have it set, so any
+        stray bytes are discarded to stay aligned.
+        """
+        while buffer:
+            if buffer[0] & 0x80:
                 LOGGER.debug(
-                    "Kramer listener: connection closed by remote "
-                    "device at %s:%s",
-                    self._ip_address,
-                    self._port,
+                    "Kramer listener: discarding stray byte 0x%02x",
+                    buffer[0],
                 )
+                del buffer[0]
+                continue
+            if len(buffer) < _PACKET_SIZE:
                 return
-
-            buffer.extend(chunk)
-
-            # Process all complete 4-byte packets in the buffer
-            while len(buffer) >= _PACKET_SIZE:
-                packet = buffer[:_PACKET_SIZE]
-                buffer = buffer[_PACKET_SIZE:]
-                self._handle_packet(bytes(packet))
+            if not all(b & 0x80 for b in buffer[1:_PACKET_SIZE]):
+                LOGGER.debug(
+                    "Kramer listener: discarding malformed start byte 0x%02x",
+                    buffer[0],
+                )
+                del buffer[0]
+                continue
+            packet = bytes(buffer[:_PACKET_SIZE])
+            del buffer[:_PACKET_SIZE]
+            self._handle_packet(packet)
 
     def _handle_packet(self, packet: bytes) -> None:
         """
-        Parse a 4-byte Protocol 2000 packet and call the state
-        update callback if it is a valid switching status message.
-
-        Protocol 2000 packet structure:
-          Byte 0: Instruction (0x01 = video/audio switch)
-          Byte 1: Input number (1-based, high bit set = 0x80 + input)
-          Byte 2: Output number (high bit set = 0x80 + output)
-          Byte 3: Machine number (high bit set = 0x80 + machine)
+        Handle one 4-byte packet: [instruction][input][output][machine].
+        Only "input N to all outputs" updates Home Assistant for now.
         """
-        LOGGER.debug(
-            "Kramer listener raw packet: %s",
-            packet.hex(),
-        )
+        LOGGER.debug("Kramer listener raw packet: %s", packet.hex())
 
         instruction = packet[0] & 0x3F
-        if instruction != 0x01:
-            # Not a switch instruction — ignore
+        if instruction != _INSTRUCTION_SWITCH_VIDEO:
             LOGGER.debug(
-                "Kramer listener: ignoring non-switch packet "
-                "(instruction byte: 0x%02x)",
+                "Kramer listener: ignoring packet (instruction %s)",
                 instruction,
             )
             return
 
-        # Strip the high bit flag to get the actual input number
         input_number = packet[1] & 0x7F
-        source = str(input_number)
+        output_number = packet[2] & 0x7F
+
+        if output_number != 0:
+            LOGGER.debug(
+                "Kramer listener: input %s routed to output %s only "
+                "(single-output routes are not tracked yet)",
+                input_number,
+                output_number,
+            )
+            return
 
         LOGGER.info(
-            "Kramer listener: source changed to input %s at %s:%s",
-            source,
+            "Kramer listener: all outputs set to input %s at %s:%s",
+            input_number,
             self._ip_address,
             self._port,
         )
-        self._on_source_change(source)
+        self._on_source_change(str(input_number))

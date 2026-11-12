@@ -6,11 +6,11 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
-from .const import DOMAIN, SOURCE_OFF
+from .const import DOMAIN, SOURCE_MIXED, SOURCE_OFF
 from .protocol import KramerClient, KramerError
 
 
@@ -31,6 +31,16 @@ type KramerConfigEntry = ConfigEntry[KramerData]
 def source_options(data: KramerData) -> list[str]:
     """Return the selectable sources: every input name plus Off."""
     return [*data.input_names, SOURCE_OFF]
+
+
+def source_options_with_mixed(data: KramerData) -> list[str]:
+    """Return sources plus Mixed, which is shown as a status and cannot be chosen."""
+    return [*source_options(data), SOURCE_MIXED]
+
+
+def reject_mixed() -> None:
+    """Raise the error shown when someone chooses Mixed."""
+    raise ServiceValidationError("Mixed is only a status. Choose an input or Off instead.")
 
 
 def input_to_name(data: KramerData, number: int | None) -> str | None:

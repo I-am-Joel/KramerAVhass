@@ -24,7 +24,7 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
 )
 
-from . import default_input_names, default_output_names
+from . import default_input_names, default_output_names, effective_names, legacy_input_names
 from .const import (
     CONF_HOST,
     CONF_INPUT_NAMES,
@@ -42,7 +42,7 @@ from .const import (
     SOURCE_MIXED,
     SOURCE_OFF,
 )
-from .models import MAX_PORTS, MODELS, OTHER
+from .models import MAX_PORTS, MODELS, OTHER, resolve_model_key
 from .protocol import KramerConnectionError, KramerTimeoutError, async_probe
 
 CONF_NAME = "name"
@@ -140,7 +140,11 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_HOST, default=cur.get(CONF_HOST, "")): TextSelector(),
                 vol.Required(CONF_PORT, default=int(cur.get(CONF_PORT, DEFAULT_PORT))): _number(1, 65535),
                 vol.Required(CONF_MACHINE, default=int(cur.get(CONF_MACHINE, DEFAULT_MACHINE))): _number(1, 15),
-                vol.Required(CONF_MODEL, default=cur.get(CONF_MODEL, next(iter(MODELS)))): _model_selector(),
+                vol.Required(
+                    CONF_MODEL,
+                    default=resolve_model_key(cur.get(CONF_MODEL))
+                    or (OTHER if cur.get(CONF_MODEL) == OTHER else next(iter(MODELS))),
+                ): _model_selector(),
             }
         )
         step = "reconfigure" if self.source == "reconfigure" else "user"
@@ -219,10 +223,15 @@ class KramerOptionsFlow(OptionsFlow):
             elif len({n.casefold() for n in out_names}) != len(out_names):
                 errors[CONF_OUTPUT_NAMES] = "duplicate_names"
             if not errors:
-                return self.async_create_entry(data={CONF_INPUT_NAMES: in_names, CONF_OUTPUT_NAMES: out_names})
+                return self.async_create_entry(
+                    data={
+                        CONF_INPUT_NAMES: [n if n != d else "" for n, d in zip(in_names, in_defaults, strict=True)],
+                        CONF_OUTPUT_NAMES: [n if n != d else "" for n, d in zip(out_names, out_defaults, strict=True)],
+                    }
+                )
 
-        saved_in = entry.options.get(CONF_INPUT_NAMES) or in_defaults
-        saved_out = entry.options.get(CONF_OUTPUT_NAMES) or out_defaults
+        saved_in = effective_names(entry.options.get(CONF_INPUT_NAMES), in_defaults, legacy_input_names(inputs))
+        saved_out = effective_names(entry.options.get(CONF_OUTPUT_NAMES), out_defaults)
         multiline = TextSelector(TextSelectorConfig(multiline=True))
         schema = vol.Schema(
             {

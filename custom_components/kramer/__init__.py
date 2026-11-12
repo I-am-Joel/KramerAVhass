@@ -13,7 +13,6 @@ from .const import (
     CONF_INPUT_NAMES,
     CONF_INPUTS,
     CONF_MACHINE,
-    CONF_MODEL_NAME,
     CONF_MODES,
     CONF_OUTPUT_NAMES,
     CONF_OUTPUTS,
@@ -22,6 +21,7 @@ from .const import (
     DEFAULT_PORT,
 )
 from .entity import KramerConfigEntry, KramerData
+from .models import resolve_model_name
 from .protocol import KramerClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,8 +30,8 @@ PLATFORMS = [Platform.MEDIA_PLAYER, Platform.SELECT, Platform.SWITCH]
 
 
 def default_input_names(count: int) -> list[str]:
-    """Return 01, 02, 03 ..."""
-    return [f"{i:02d}" for i in range(1, count + 1)]
+    """Return Input 01, Input 02 ..."""
+    return [f"Input {i:02d}" for i in range(1, count + 1)]
 
 
 def default_output_names(count: int) -> list[str]:
@@ -39,10 +39,21 @@ def default_output_names(count: int) -> list[str]:
     return [f"Output {i:02d}" for i in range(1, count + 1)]
 
 
-def _names(saved: list[str] | None, defaults: list[str]) -> list[str]:
-    """Use saved names where present, defaults for the rest."""
+def effective_names(saved: list[str] | None, defaults: list[str], legacy: list[str] | None = None) -> list[str]:
+    """Use saved names where customised; defaults for blanks and old-style defaults."""
     saved = saved or []
-    return [saved[i] if i < len(saved) and saved[i] else d for i, d in enumerate(defaults)]
+    names = []
+    for i, default in enumerate(defaults):
+        name = saved[i] if i < len(saved) else ""
+        if not name or (legacy and name == legacy[i]):
+            name = default
+        names.append(name)
+    return names
+
+
+def legacy_input_names(count: int) -> list[str]:
+    """Return the version 0.10.0 default names: 01, 02 ..."""
+    return [f"{i:02d}" for i in range(1, count + 1)]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
@@ -67,9 +78,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
     )
     entry.runtime_data = KramerData(
         client=client,
-        model_name=data.get(CONF_MODEL_NAME, "Matrix switcher"),
-        input_names=_names(entry.options.get(CONF_INPUT_NAMES), default_input_names(inputs)),
-        output_names=_names(entry.options.get(CONF_OUTPUT_NAMES), default_output_names(outputs)),
+        model_name=resolve_model_name(data),
+        input_names=effective_names(
+            entry.options.get(CONF_INPUT_NAMES), default_input_names(inputs), legacy_input_names(inputs)
+        ),
+        output_names=effective_names(entry.options.get(CONF_OUTPUT_NAMES), default_output_names(outputs)),
         supports_modes=bool(data.get(CONF_MODES, True)),
     )
 

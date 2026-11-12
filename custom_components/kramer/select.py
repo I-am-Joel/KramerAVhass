@@ -6,12 +6,15 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .const import SOURCE_MIXED
 from .entity import (
     KramerConfigEntry,
     KramerEntity,
     input_to_name,
     name_to_input,
+    reject_mixed,
     source_options,
+    source_options_with_mixed,
 )
 from .protocol import MODE_AFV, MODE_BREAKAWAY
 
@@ -41,15 +44,17 @@ class KramerAllOutputs(KramerEntity, SelectEntity):
     def __init__(self, entry: KramerConfigEntry) -> None:
         """Initialise."""
         super().__init__(entry, "all_outputs")
-        self._attr_options = source_options(self._data)
+        self._attr_options = source_options_with_mixed(self._data)
 
     @property
-    def current_option(self) -> str | None:
-        """Return the common input, or nothing while outputs differ."""
-        return input_to_name(self._data, self._client.common_input)
+    def current_option(self) -> str:
+        """Return the common input, or Mixed while outputs differ."""
+        return input_to_name(self._data, self._client.common_input) or SOURCE_MIXED
 
     async def async_select_option(self, option: str) -> None:
         """Route to all outputs."""
+        if option == SOURCE_MIXED:
+            reject_mixed()
         await self._call(self._client.async_set_route(0, name_to_input(self._data, option)))
 
 

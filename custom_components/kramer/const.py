@@ -1,17 +1,21 @@
-"""Constants for Kramer integration."""
-from logging import Logger, getLogger
+"""Constants for the Kramer integration."""
 
-LOGGER: Logger = getLogger(__package__)
-
-NAME = "Kramer"
 DOMAIN = "kramer"
 
-DATA_INPUT_COUNT = "input_count"
-DATA_OUTPUT_COUNT = "output_count"
-DATA_SOURCE_SELECTED = "source_selected"
-DATA_SOURCE_LIST = "source_list"
-DATA_STATE = "state"
+CONF_HOST = "ip_address"  # key kept from earlier versions
+CONF_PORT = "port"
+CONF_MACHINE = "machine"
+CONF_MODEL = "model"
+CONF_MODEL_NAME = "model_name"
+CONF_INPUTS = "inputs"
+CONF_OUTPUTS = "outputs"
+CONF_MODES = "supports_modes"
 
-ENTITY_KEY = "kramer_media_switch"
-ENTITY_PLACEHOLDER_INPUTS_KEY = "input_count"
-ENTITY_PLACEHOLDER_OUTPUTS_KEY = "output_count"
+CONF_INPUT_NAMES = "input_names"
+CONF_OUTPUT_NAMES = "output_names"
+
+DEFAULT_PORT = 9001
+DEFAULT_MACHINE = 1
+
+SOURCE_OFF = "Off"
+SOURCE_MIXED = "Mixed"

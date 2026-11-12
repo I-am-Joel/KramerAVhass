@@ -1,97 +1,58 @@
-"""Media Player platform entity implementation."""
+"""Media player: one source selector for the whole matrix."""
+
+from __future__ import annotations
+
 from homeassistant.components.media_player import (
-    MediaPlayerDeviceClass,
-    MediaPlayerEntityDescription,
-    MediaPlayerEntityFeature,
     MediaPlayerEntity,
+    MediaPlayerEntityFeature,
     MediaPlayerState,
 )
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
-    DATA_INPUT_COUNT,
-    DATA_OUTPUT_COUNT,
-    DATA_SOURCE_LIST,
-    DATA_SOURCE_SELECTED,
-    DATA_STATE,
-    DOMAIN,
-)
-from .api import KramerApiClient
-from .coordinator import KramerDataUpdateCoordinator
-from .entity import KramerEntity
-
-ENTITY_DESCRIPTIONS = (
-    MediaPlayerEntityDescription(
-        key=DOMAIN,
-        device_class=MediaPlayerDeviceClass.RECEIVER,
-        has_entity_name=True,
-    ),
+from .const import SOURCE_MIXED
+from .entity import (
+    KramerConfigEntry,
+    KramerEntity,
+    input_to_name,
+    name_to_input,
+    source_options,
 )
 
-async def async_setup_entry(hass, entry, async_add_devices):
-    """Set up devices based on config entry."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_devices(
-        KramerMediaPlayer(
-            coordinator=coordinator,
-            entity_description=entity_description
-        )
-        for entity_description in ENTITY_DESCRIPTIONS
-    )
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: KramerConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up the media player."""
+    async_add_entities([KramerMediaPlayer(entry)])
+
 
 class KramerMediaPlayer(KramerEntity, MediaPlayerEntity):
-    """Representation of a Kramer media switch."""
+    """Selecting a source sends that input to every output."""
 
-    _attr_supported_features = (
-        MediaPlayerEntityFeature.SELECT_SOURCE
-    )
     _attr_name = None
+    _attr_supported_features = MediaPlayerEntityFeature.SELECT_SOURCE
 
-    def __init__(
-        self,
-        coordinator: KramerDataUpdateCoordinator,
-        entity_description: MediaPlayerEntityDescription,
-    ) -> None:
-        """Initialize the entity."""
-        super().__init__(coordinator)
-        self.entity_description = entity_description
+    def __init__(self, entry: KramerConfigEntry) -> None:
+        """Initialise."""
+        super().__init__(entry, "media_player")
+        self._attr_unique_id = entry.entry_id
 
     @property
-    def input_count(self) -> int:
-        """Number of inputs supported by the media player."""
-        return self._prop(DATA_INPUT_COUNT)
+    def state(self) -> MediaPlayerState:
+        """Return on while the unit is answering."""
+        return MediaPlayerState.ON
 
     @property
-    def output_count(self) -> int:
-        """Number of outputs supported by the media player."""
-        return self._prop(DATA_OUTPUT_COUNT)
+    def source_list(self) -> list[str]:
+        """Return the selectable sources."""
+        return source_options(self._data)
 
     @property
-    def source(self) -> str | None:
-        """Name of the current input source."""
-        return self._prop(DATA_SOURCE_SELECTED)
-
-    @property
-    def source_list(self) -> list[str] | None:
-        """List of available input sources."""
-        return self._prop(DATA_SOURCE_LIST)
-
-    @property
-    def state(self) -> MediaPlayerState | None:
-        """State of the player."""
-        return self._prop(DATA_STATE)
-
-    def select_source(self, source: str) -> None:
-        """Select input source."""
-        self._client.select_source(source)
+    def source(self) -> str:
+        """Return the common source, Off, or Mixed."""
+        return input_to_name(self._data, self._client.common_input) or SOURCE_MIXED
 
     async def async_select_source(self, source: str) -> None:
-        """Select input source."""
-        await self.hass.async_add_executor_job(self.select_source, source)
-        await self.coordinator.async_request_refresh()
-
-    @property
-    def _client(self) -> KramerApiClient:
-        return self.coordinator.client
-
-    def _prop(self, key: str):
-        return self.coordinator.data.get(key)
+        """Send a source to all outputs."""
+        await self._call(self._client.async_set_route(0, name_to_input(self._data, source)))

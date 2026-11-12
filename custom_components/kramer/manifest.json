@@ -1,16 +1,12 @@
 {
   "domain": "kramer",
-  "name": "Kramer",
-  "codeowners": [
-    "@I-am-Joel"
-  ],
+  "name": "Kramer Matrix Switcher",
+  "codeowners": ["@I-am-Joel"],
   "config_flow": true,
-  "documentation": "https://github.com/krohrbaugh/kramer-homeassistant",
+  "documentation": "https://github.com/I-am-Joel/KramerAVhass",
   "integration_type": "device",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/krohrbaugh/kramer-homeassistant/issues",
-  "requirements": [
-    "kessler-av==0.9.0"
-  ],
-  "version": "0.9.0"
+  "issue_tracker": "https://github.com/I-am-Joel/KramerAVhass/issues",
+  "requirements": [],
+  "version": "0.10.0"
 }

@@ -1,23 +1,71 @@
 {
-    "config": {
-        "step": {
-            "user": {
-                "description": "Add media switch by IP or hostname",
-                "data": {
-                    "name": "Name",
-                    "ip_address": "IP Address",
-                    "port": "Port"
-                },
-                "data_description": {
-                    "name": "Device name (e.g., model or other identifier).",
-                    "ip_address": "IP address, or hostname of device.",
-                    "port": "TCP port used to communicate with device."
-                }
-            }
-        },
-        "error": {
-            "connection": "Unable to connect to the device.",
-            "unknown": "Unknown error occurred."
+  "config": {
+    "step": {
+      "user": {
+        "title": "Kramer matrix switcher",
+        "description": "Enter the address of the serial-to-Ethernet bridge the switcher is plugged into.",
+        "data": {
+          "name": "Name",
+          "ip_address": "IP address",
+          "port": "Port",
+          "machine": "Machine number (1 unless daisy-chained)",
+          "model": "Model"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Kramer matrix switcher",
+        "data": {
+          "name": "Name",
+          "ip_address": "IP address",
+          "port": "Port",
+          "machine": "Machine number (1 unless daisy-chained)",
+          "model": "Model"
+        }
+      },
+      "other": {
+        "title": "Other model",
+        "description": "Enter the size of your switcher.",
+        "data": {
+          "model_name": "Model name",
+          "inputs": "Number of inputs",
+          "outputs": "Number of outputs",
+          "supports_modes": "Supports separate audio and video switching"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect. Check the IP address and port.",
+      "no_reply": "Connected, but the switcher did not answer. Check the cable, the machine number and the bridge's serial settings."
+    },
+    "abort": {
+      "already_configured": "This switcher is already set up.",
+      "reconfigure_successful": "Settings updated."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Input and output names",
+        "description": "One name per line, in order. Leave a line blank to use the default.",
+        "data": {
+          "input_names": "Input names",
+          "output_names": "Output names"
+        }
+      }
+    },
+    "error": {
+      "too_many_names": "More names than the switcher has ports.",
+      "duplicate_names": "Names must all be different.",
+      "reserved_name": "Input names cannot be \"Off\" or \"Mixed\"."
+    }
+  },
+  "entity": {
+    "select": {
+      "all_outputs": { "name": "All outputs" },
+      "mode": { "name": "Mode" }
+    },
+    "switch": {
+      "panel_lock": { "name": "Front panel lock" }
+    }
+  }
 }

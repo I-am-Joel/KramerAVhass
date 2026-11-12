@@ -147,7 +147,7 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id=step, data_schema=schema, errors=errors)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Same screens as setup, pre-filled."""
+        """Show the setup screens, pre-filled."""
         return await self.async_step_user(user_input)
 
     async def async_step_other(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

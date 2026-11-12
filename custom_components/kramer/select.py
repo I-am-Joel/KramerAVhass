@@ -13,12 +13,11 @@ from .entity import (
     name_to_input,
     source_options,
 )
-from .protocol import MODE_AFV, MODE_AUDIO, MODE_VIDEO
+from .protocol import MODE_AFV, MODE_BREAKAWAY
 
 MODE_LABELS = {
     MODE_AFV: "Audio follow video",
-    MODE_VIDEO: "Video only",
-    MODE_AUDIO: "Audio only",
+    MODE_BREAKAWAY: "Breakaway",
 }
 
 
@@ -78,11 +77,11 @@ class KramerModeSelect(KramerEntity, SelectEntity):
     """Audio-follow-video, video-only or audio-only switching."""
 
     _attr_translation_key = "mode"
-    _attr_options = list(MODE_LABELS.values())
 
     def __init__(self, entry: KramerConfigEntry) -> None:
         """Initialise."""
         super().__init__(entry, "mode")
+        self._attr_options = list(MODE_LABELS.values())
 
     @property
     def current_option(self) -> str | None:
@@ -94,8 +93,8 @@ class KramerModeSelect(KramerEntity, SelectEntity):
     def extra_state_attributes(self) -> dict[str, str]:
         """Warn that audio and video can be split."""
         return {
-            "note": "Video only and Audio only let audio and video follow different "
-            "inputs. Set back to Audio follow video to keep them together."
+            "note": "Breakaway lets audio and video follow different inputs. "
+            "Set back to Audio follow video to keep them together."
         }
 
     async def async_select_option(self, option: str) -> None:

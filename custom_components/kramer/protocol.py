@@ -35,10 +35,10 @@ INSTR_ERROR = 16
 INSTR_LOCK_PANEL = 30
 INSTR_REQUEST_LOCK = 31
 
-# Values of instruction 8 (breakaway setting), sent in the output byte.
+# Values of instruction 8 that the VS-162AV accepts (it answers 1 for
+# breakaway whichever of VIDEO or AUDIO is selected on the front panel).
 MODE_AFV = 0
-MODE_VIDEO = 1
-MODE_AUDIO = 2
+MODE_BREAKAWAY = 1
 
 # Error codes carried in the output byte of an instruction-16 reply.
 # 4 and 5 are "input invalid / valid" notifications, not errors.
@@ -332,14 +332,15 @@ class KramerClient:
         self._notify()
 
     async def async_set_mode(self, mode: int) -> None:
-        """Set audio-follow-video (0), video (1) or audio (2) mode."""
-        await self._request(
+        """Set audio-follow-video (0) or breakaway (1) mode."""
+        reply = await self._request(
             build_packet(INSTR_BREAKAWAY, 0, mode, self._machine),
             INSTR_BREAKAWAY,
-            lambda p: p.output == mode,
         )
-        self.mode = mode
+        self.mode = reply.output
         self._notify()
+        if reply.output != mode:
+            raise KramerCommandError(f"The unit stayed in mode {reply.output} instead of {mode}")
 
     async def async_set_lock(self, locked: bool) -> None:
         """Lock or unlock the front panel."""

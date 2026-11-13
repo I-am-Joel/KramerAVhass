@@ -129,6 +129,7 @@ More models can be added to `custom_components/kramer/models.py`.
 ## Planned if possible
 
 - Read only sensors.
+- Increase matrix size up to 127x127 switches.
 - "Set route" action option for HASS automations.
 - Separate video and audio routing options in Breakaway mode.
 - Storing and recalling a unit's preset configuration.
@@ -156,6 +157,7 @@ Assistant restarts. The log shows each connected unit's four-byte messages in he
 | "Connected, but the switcher did not answer" | Serial settings, cable or null-modem setting or adaptor, or wrong machine number. Check dip switches on the unit match required configuration. On some models the up/down and switch numbers aren't clear. EG VS-812 where switches are on the underside and 1 to 4 run from right to left of the unit, as viewed from the front, with "on" being towards the back<img width="1200" height="800" alt="vs-821-underside" src="https://github.com/user-attachments/assets/1a19251d-acca-45bc-bcf6-f86c340d9d69" />Image shows underside of Kramer VS-812 with switch 1 in the "on" position. |
 | Entities unavailable | Bridge or switcher is off, or the network is down. The integration should recover by itself when the underlying issue is resolved. |
 | Connection resets when two or more applications are communicating with the bridge | In testing with a Brainboxes ES-246, reliable operation was confirmed with one application using the bridge's port and became unreliable with two. Different bridges or firmware versions may support this better. |
+| Serial link not working | Try: (printf '…'; sleep 3) | nc -w 5 IP PORT | od -An -tx1 via a command line from within your Home Assistant installation. Note that the connection must stay open long enough to receive any reply. |
 
 ## Credits
 

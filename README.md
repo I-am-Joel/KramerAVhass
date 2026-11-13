@@ -149,7 +149,8 @@ Assistant restarts. The log shows each connected unit's four-byte messages in he
 | Symptom | Likely cause |
 | -- | -- |
 | "Could not connect" during setup | Wrong IP or port, or the bridge is not in raw TCP server mode. |
-| "Connected, but the switcher did not answer" | Serial settings, cable or null-modem setting or adaptor, or wrong machine number. |
+| "Connected, but the switcher did not answer" | Serial settings, cable or null-modem setting or adaptor, or wrong machine number. Check dip switches on the unit match required configuration. On some models the up/down and switch numbers aren't clear. EG VS-812 where switches are on the underside and 1 to 4 run from right to left of the unit, as viewed from the front, with "on" being towards the back<img width="1200" height="800" alt="vs-821-underside" src="https://github.com/user-attachments/assets/1a19251d-acca-45bc-bcf6-f86c340d9d69" />
+ |
 | Entities unavailable | Bridge or switcher is off, or the network is down. This should recover by itself when the issue is resolved. |
 | Connection resets with two programs attached | Only one client should use the bridge's port. |
 

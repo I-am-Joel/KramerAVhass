@@ -107,7 +107,7 @@ Copy the `custom_components/kramer` folder from this repository into the
 | Model | Notes |
 | -- | -- |
 | VS-162AV / VS-162AVRCA | 16 x 16, audio-follow-video and breakaway. Tested on the RCA version. |
-| Other | Enter the number of inputs and outputs yourself. |
+| VS-812 | 8 x 1, input switching. |
 
 More models can be added to `custom_components/kramer/models.py`.
 
@@ -150,8 +150,8 @@ Assistant restarts. The log shows each connected unit's four-byte messages in he
 | -- | -- |
 | "Could not connect" during setup | Wrong IP or port, or the bridge is not in raw TCP server mode. |
 | "Connected, but the switcher did not answer" | Serial settings, cable or null-modem setting or adaptor, or wrong machine number. Check dip switches on the unit match required configuration. On some models the up/down and switch numbers aren't clear. EG VS-812 where switches are on the underside and 1 to 4 run from right to left of the unit, as viewed from the front, with "on" being towards the back<img width="1200" height="800" alt="vs-821-underside" src="https://github.com/user-attachments/assets/1a19251d-acca-45bc-bcf6-f86c340d9d69" />Image shows underside of Kramer VS-812 with switch 1 in the "on" position. |
-| Entities unavailable | Bridge or switcher is off, or the network is down. This should recover by itself when the issue is resolved. |
-| Connection resets when two or more applications are communicating with the bridge | In testing with a Brainboxes ES-246, reliable operation was confirmed with one application using the bridge's port and became unreliable with two. Other bridges may support this better. |
+| Entities unavailable | Bridge or switcher is off, or the network is down. The integration should recover by itself when the underlying issue is resolved. |
+| Connection resets when two or more applications are communicating with the bridge | In testing with a Brainboxes ES-246, reliable operation was confirmed with one application using the bridge's port and became unreliable with two. Different bridges or firmware versions may support this better. |
 
 ## Credits
 

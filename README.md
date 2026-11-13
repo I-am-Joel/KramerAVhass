@@ -8,9 +8,9 @@ the unit immediately, too.
 This is a fork of [krohrbaugh/kramer-homeassistant][original] by Kevin
 Rohrbaugh, and it would not exist without his work. See [Credits](#credits).
 
-> **Status:** early release. I have tested on one unit (a Kramer
-> VS-162AVRCA), connected through a Brainboxes ES-257 serial-to-Ethernet
-> bridge. Other models and bridges are expected to work but are untested.
+> **Status:** early release. I have tested two units (a Kramer
+> VS-162AVRCA and a VS812), respectively connected through Brainboxes ES-257 and ES-256 serial-to-Ethernet
+> bridges. Other models and bridges are expected to work but are untested.
 
 ## What you get
 

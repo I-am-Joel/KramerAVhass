@@ -14,11 +14,11 @@ Rohrbaugh, and it would not exist without his work. See [Credits](#credits).
 
 ## What you get
 
-For each switcher you add, the integration creates one device with:
+Depending on the features your switcher supports, the integration creates one device with one, some or all of:
 
 | Entity | Type | What it does |
 | -- | -- | -- |
-| Device name (for example "Dining Room Kramer") | `media_player` | Choose one input for **all** outputs. Shows **Mixed** when the outputs are not all set to the same input, and **Off** when all are disconnected. |
+| Device name (for example "Studio 1 - VS-812") | `media_player` | Choose one input for **all** outputs. Shows **Mixed** when the outputs are not all set to the same input, and **Off** when all are disconnected. |
 | All outputs | `select` | The same as the media player, exposed as a simple input list drop-down that sends to all outputs at once. |
 | Output 01, Output 02 ... | `select` | One per output. Choose which input feeds that output, or **Off** to turn the output off. |
 | Mode | `select` | **Audio follow video** or **Breakaway** (see [Limitations](#limitations)). |
@@ -111,7 +111,7 @@ Copy the `custom_components/kramer` folder from this repository into the
 
 More models can be added to `custom_components/kramer/models.py`.
 
-## Limitations
+## Limitations (not all features apply to all models)
 
 - **Mode.** In testing, my unit only reported whether it is in audio-follow-video or
   breakaway mode. I could not get it to report whether VIDEO or AUDIO is selected on the
@@ -120,17 +120,21 @@ More models can be added to `custom_components/kramer/models.py`.
   following whatever it was last set to. Changing the audio separately is not
   yet supported, although I hope to figure this out another time.
 - **Matrix format is not read from the unit.** In testing, my VS-162AV did not report its own
-  number of inputs and outputs, so the matrix format is defined either by a selected preset models (currently only the VS-162) or via manual entry during setup.
-- **Front-panel lock.** The toggles on and off via the integration on my VS-162, but I couldn't see any indicator of its status on the front panel or display of the unit.
+  number of inputs and outputs, so the matrix format is defined either by selecting a preset model or via manual entry during setup.
+- **Front-panel lock.** The toggles on and off via the integration on my VS-162, but I couldn't see any indicator of its status on the front panel or display of the unit. 
 - **One unit per entry.** Add the integration once per switcher. Daisy-chained
   units using different machine numbers on one connection are not yet - and may never be - handled
   as a group.
 
 ## Planned if possible
 
-- Separate audio routing in Breakaway mode.
+- Read only sensors.
+- "Set route" action option for HASS automations.
+- Separate video and audio routing options in Breakaway mode.
 - Storing and recalling a unit's preset configuration.
 - Supporting multiple daisy-chained units on a single connection.
+- Diagnostics download link to output anonymised configuration date for troubleshooting.
+- A model-definition wizard so users can contribute model profiles to the project through GitHub.
 - More models predefined if I can access and test them and an easier way for users to define those that aren't.
 
 ## Troubleshooting

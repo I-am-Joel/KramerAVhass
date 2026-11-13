@@ -23,10 +23,12 @@ class KramerModel:
     inputs: int
     outputs: int
     supports_modes: bool
+    supports_off: bool = True
 
 
 MODELS: dict[str, KramerModel] = {
     "vs-162av-rca": KramerModel("vs-162av-rca", "VS-162AV/RCA", 16, 16, True),
+    "vs-812": KramerModel("vs-812", "VS-812", 8, 1, False, supports_off=False),
 }
 
 # Keys saved by earlier versions, mapped to their current entry.
@@ -45,3 +47,9 @@ def resolve_model_name(data: Mapping[str, Any]) -> str:
     if key:
         return MODELS[key].name
     return data.get("model_name") or "Matrix switcher"
+
+
+def resolve_supports_off(data: Mapping[str, Any]) -> bool:
+    """Return whether the model can disconnect an output (unknown models: yes)."""
+    key = resolve_model_key(data.get("model"))
+    return MODELS[key].supports_off if key else True

@@ -241,6 +241,7 @@ class KramerClient:
         self.routes: dict[int, int] = {}
         self.mode: int | None = None
         self.locked: bool | None = None
+        self.lock_supported: bool | None = None
 
     # ------------------------------------------------------------------
     # Public state helpers
@@ -270,7 +271,7 @@ class KramerClient:
         for callback in list(self._listeners):
             try:
                 callback()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _LOGGER.exception("Error in state listener")
 
     def _set_available(self, available: bool) -> None:
@@ -418,7 +419,7 @@ class KramerClient:
                 await self._session()
             except asyncio.CancelledError:
                 raise
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 _LOGGER.debug("Connection to %s:%s lost: %s", self._host, self._port, err)
             self._set_available(False)
             await asyncio.sleep(self._reconnect_delay)
@@ -538,14 +539,22 @@ class KramerClient:
                 _LOGGER.debug("Unit does not report its mode")
 
         locked = self.locked
-        try:
-            reply = await self._request(
-                build_packet(INSTR_REQUEST_LOCK, 0, 0, self._machine),
-                INSTR_REQUEST_LOCK,
-            )
-            locked = reply.output == 1
-        except KramerCommandError:
-            _LOGGER.debug("Unit does not report its lock state")
+        if self.lock_supported is not False:
+            try:
+                reply = await self._request(
+                    build_packet(INSTR_REQUEST_LOCK, 0, 0, self._machine),
+                    INSTR_REQUEST_LOCK,
+                )
+            except (KramerCommandError, KramerTimeoutError):
+                if self.lock_supported:
+                    raise
+                # Never answered, though the route reads just worked: this unit
+                # does not support the lock instructions.
+                _LOGGER.debug("Unit does not report its lock state")
+                self.lock_supported = False
+            else:
+                locked = reply.output == 1
+                self.lock_supported = True
 
         self.routes = routes
         self.mode = mode

@@ -28,6 +28,11 @@ class KramerLockSwitch(KramerEntity, SwitchEntity):
         super().__init__(entry, "panel_lock")
 
     @property
+    def available(self) -> bool:
+        """Return whether the unit answers and supports the lock."""
+        return super().available and self._client.lock_supported is not False
+
+    @property
     def is_on(self) -> bool | None:
         """Return whether the panel is locked."""
         return self._client.locked

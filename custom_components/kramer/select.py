@@ -29,7 +29,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up the selects."""
     data = entry.runtime_data
-    entities: list[SelectEntity] = [KramerAllOutputs(entry)]
+    entities: list[SelectEntity] = []
+    if len(data.output_names) > 1:
+        entities.append(KramerAllOutputs(entry))
     entities += [KramerOutputSelect(entry, number, name) for number, name in enumerate(data.output_names, start=1)]
     if data.supports_modes:
         entities.append(KramerModeSelect(entry))

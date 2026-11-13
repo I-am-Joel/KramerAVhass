@@ -21,7 +21,7 @@ from .const import (
     DEFAULT_PORT,
 )
 from .entity import KramerConfigEntry, KramerData
-from .models import resolve_model_name
+from .models import resolve_model_name, resolve_supports_off
 from .protocol import KramerClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -84,6 +84,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         ),
         output_names=effective_names(entry.options.get(CONF_OUTPUT_NAMES), default_output_names(outputs)),
         supports_modes=bool(data.get(CONF_MODES, True)),
+        supports_off=resolve_supports_off(data),
     )
 
     await client.async_start()

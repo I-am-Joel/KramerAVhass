@@ -23,6 +23,7 @@ class KramerData:
     input_names: list[str]
     output_names: list[str]
     supports_modes: bool
+    supports_off: bool = True
 
 
 type KramerConfigEntry = ConfigEntry[KramerData]
@@ -30,7 +31,9 @@ type KramerConfigEntry = ConfigEntry[KramerData]
 
 def source_options(data: KramerData) -> list[str]:
     """Return the selectable sources: every input name plus Off."""
-    return [*data.input_names, SOURCE_OFF]
+    if data.supports_off:
+        return [*data.input_names, SOURCE_OFF]
+    return list(data.input_names)
 
 
 def source_options_with_mixed(data: KramerData) -> list[str]:

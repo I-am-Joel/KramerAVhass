@@ -11,6 +11,9 @@ CONF_INPUTS = "inputs"
 CONF_OUTPUTS = "outputs"
 CONF_MODES = "supports_modes"
 
+CONF_PRESET_SLOTS = "preset_slots"
+CONF_PRESET_DESCRIPTIONS = "preset_descriptions"
+
 CONF_INPUT_NAMES = "input_names"
 CONF_OUTPUT_NAMES = "output_names"
 

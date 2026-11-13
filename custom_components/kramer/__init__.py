@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection, Sequence
 
+import voluptuous as vol
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     CONF_HOST,
@@ -17,43 +21,64 @@ from .const import (
     CONF_OUTPUT_NAMES,
     CONF_OUTPUTS,
     CONF_PORT,
+    CONF_PRESET_DESCRIPTIONS,
     DEFAULT_MACHINE,
     DEFAULT_PORT,
+    DOMAIN,
 )
 from .entity import KramerConfigEntry, KramerData
-from .models import resolve_model_name, resolve_supports_off
+from .models import resolve_model_name, resolve_preset_slots, resolve_supports_lock, resolve_supports_off
+from .presets import parse_descriptions
 from .protocol import KramerClient
+from .services import async_register_services
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.MEDIA_PLAYER, Platform.SELECT, Platform.SWITCH]
+CONFIG_SCHEMA: vol.Schema = cv.config_entry_only_config_schema(DOMAIN)
+
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.MEDIA_PLAYER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
 
 
 def default_input_names(count: int) -> list[str]:
-    """Return Input 01, Input 02 ..."""
-    return [f"Input {i:02d}" for i in range(1, count + 1)]
+    """Return Input 001, Input 002 ..."""
+    return [f"Input {i:03d}" for i in range(1, count + 1)]
 
 
 def default_output_names(count: int) -> list[str]:
-    """Return Output 01, Output 02 ..."""
-    return [f"Output {i:02d}" for i in range(1, count + 1)]
+    """Return Output 001, Output 002 ..."""
+    return [f"Output {i:03d}" for i in range(1, count + 1)]
 
 
-def effective_names(saved: list[str] | None, defaults: list[str], legacy: list[str] | None = None) -> list[str]:
+def effective_names(
+    saved: list[str] | None,
+    defaults: list[str],
+    legacy: Sequence[Collection[str]] | None = None,
+) -> list[str]:
     """Use saved names where customised; defaults for blanks and old-style defaults."""
     saved = saved or []
     names = []
     for i, default in enumerate(defaults):
         name = saved[i] if i < len(saved) else ""
-        if not name or (legacy and name == legacy[i]):
+        if not name or (legacy and name in legacy[i]):
             name = default
         names.append(name)
     return names
 
 
-def legacy_input_names(count: int) -> list[str]:
-    """Return the version 0.10.0 default names: 01, 02 ..."""
-    return [f"{i:02d}" for i in range(1, count + 1)]
+def legacy_input_names(count: int) -> list[set[str]]:
+    """Return the earlier default names for each input: 01, then Input 01."""
+    return [{f"{i:02d}", f"Input {i:02d}"} for i in range(1, count + 1)]
+
+
+def legacy_output_names(count: int) -> list[set[str]]:
+    """Return the earlier default name for each output: Output 01."""
+    return [{f"Output {i:02d}"} for i in range(1, count + 1)]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the actions (once, for all units)."""
+    async_register_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
@@ -68,6 +93,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
             "and choose Reconfigure to pick your model."
         ) from err
 
+    preset_slots = resolve_preset_slots(data)
     client = KramerClient(
         data[CONF_HOST],
         int(data.get(CONF_PORT, DEFAULT_PORT)),
@@ -75,6 +101,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         inputs,
         outputs,
         supports_modes=bool(data.get(CONF_MODES, True)),
+        preset_slots=preset_slots,
     )
     entry.runtime_data = KramerData(
         client=client,
@@ -82,9 +109,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         input_names=effective_names(
             entry.options.get(CONF_INPUT_NAMES), default_input_names(inputs), legacy_input_names(inputs)
         ),
-        output_names=effective_names(entry.options.get(CONF_OUTPUT_NAMES), default_output_names(outputs)),
+        output_names=effective_names(
+            entry.options.get(CONF_OUTPUT_NAMES), default_output_names(outputs), legacy_output_names(outputs)
+        ),
         supports_modes=bool(data.get(CONF_MODES, True)),
         supports_off=resolve_supports_off(data),
+        supports_lock=resolve_supports_lock(data),
+        preset_slots=preset_slots,
+        preset_descriptions=parse_descriptions(entry.options.get(CONF_PRESET_DESCRIPTIONS), preset_slots),
     )
 
     await client.async_start()

@@ -7,6 +7,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigEntry,
+    ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
@@ -24,7 +25,13 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
 )
 
-from . import default_input_names, default_output_names, effective_names, legacy_input_names
+from . import (
+    default_input_names,
+    default_output_names,
+    effective_names,
+    legacy_input_names,
+    legacy_output_names,
+)
 from .const import (
     CONF_HOST,
     CONF_INPUT_NAMES,
@@ -36,14 +43,24 @@ from .const import (
     CONF_OUTPUT_NAMES,
     CONF_OUTPUTS,
     CONF_PORT,
+    CONF_PRESET_DESCRIPTIONS,
+    CONF_PRESET_SLOTS,
     DEFAULT_MACHINE,
     DEFAULT_PORT,
     DOMAIN,
     SOURCE_MIXED,
     SOURCE_OFF,
 )
-from .models import MAX_PORTS, MODELS, OTHER, resolve_model_key
-from .protocol import KramerConnectionError, KramerTimeoutError, async_probe
+from .entity import KramerData
+from .models import MAX_PORTS, MAX_PRESET_SLOTS, MODELS, OTHER, resolve_model_key, resolve_preset_slots
+from .presets import (
+    parse_descriptions,
+    serialise_descriptions,
+    slot_label,
+    summarise_routes,
+    validate_description,
+)
+from .protocol import KramerConnectionError, KramerError, KramerTimeoutError, async_probe
 
 CONF_NAME = "name"
 
@@ -166,6 +183,7 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_INPUTS: int(user_input[CONF_INPUTS]),
                     CONF_OUTPUTS: int(user_input[CONF_OUTPUTS]),
                     CONF_MODES: user_input[CONF_MODES],
+                    CONF_PRESET_SLOTS: int(user_input[CONF_PRESET_SLOTS]),
                 }
             )
             if (result := await self._finish(errors)) is not None:
@@ -177,6 +195,9 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_INPUTS, default=int(cur.get(CONF_INPUTS, 8))): _number(1, MAX_PORTS),
                 vol.Required(CONF_OUTPUTS, default=int(cur.get(CONF_OUTPUTS, 8))): _number(1, MAX_PORTS),
                 vol.Required(CONF_MODES, default=bool(cur.get(CONF_MODES, False))): BooleanSelector(),
+                vol.Required(CONF_PRESET_SLOTS, default=int(cur.get(CONF_PRESET_SLOTS, 0))): _number(
+                    0, MAX_PRESET_SLOTS
+                ),
             }
         )
         return self.async_show_form(step_id="other", data_schema=schema, errors=errors)
@@ -200,9 +221,61 @@ def _parse_names(text: str, defaults: list[str]) -> tuple[list[str], str | None]
 
 
 class KramerOptionsFlow(OptionsFlow):
-    """Rename inputs and outputs after setup."""
+    """Rename inputs and outputs, and work with stored setups (presets)."""
+
+    def __init__(self) -> None:
+        """Initialise."""
+        self._slot = 0
+        self._contents: dict[int, str] = {}
+
+    # -- helpers --------------------------------------------------------
+
+    def _live_data(self) -> KramerData | None:
+        """Return the running unit's data, or None if it is not loaded and answering."""
+        entry = self.config_entry
+        if entry.state is not ConfigEntryState.LOADED:
+            return None
+        data: KramerData = entry.runtime_data
+        return data if data.client.available else None
+
+    def _descriptions(self) -> dict[int, str]:
+        return parse_descriptions(
+            self.config_entry.options.get(CONF_PRESET_DESCRIPTIONS), resolve_preset_slots(self.config_entry.data)
+        )
+
+    def _placeholders(self, data: KramerData) -> dict[str, str]:
+        occupied = data.client.preset_defined.get(self._slot)
+        state = "Occupied" if occupied else "Blank" if occupied is False else "Not checked"
+        return {
+            "slot": f"{self._slot:02d}",
+            "state": state,
+            "description": self._descriptions().get(self._slot, "(none)"),
+            "contents": self._contents.get(self._slot, ""),
+            "error": "",
+        }
+
+    async def _read_contents(self, data: KramerData) -> None:
+        """Remember a readable summary of what the chosen slot holds."""
+        if self._slot in self._contents:
+            return
+        try:
+            stored = await data.client.async_read_preset(self._slot)
+        except KramerError:
+            self._contents[self._slot] = "It could not be read just now."
+            return
+        self._contents[self._slot] = (
+            f"It currently holds: video {summarise_routes(stored.video)}; audio {summarise_routes(stored.audio)}."
+        )
+
+    # -- steps ----------------------------------------------------------
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Choose between names and presets (models without presets go straight to names)."""
+        if resolve_preset_slots(self.config_entry.data) > 0:
+            return self.async_show_menu(step_id="init", menu_options=["names", "presets"])
+        return await self.async_step_names()
+
+    async def async_step_names(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Edit the names, one per line."""
         entry = self.config_entry
         inputs, outputs = int(entry.data[CONF_INPUTS]), int(entry.data[CONF_OUTPUTS])
@@ -225,13 +298,14 @@ class KramerOptionsFlow(OptionsFlow):
             if not errors:
                 return self.async_create_entry(
                     data={
+                        **entry.options,
                         CONF_INPUT_NAMES: [n if n != d else "" for n, d in zip(in_names, in_defaults, strict=True)],
                         CONF_OUTPUT_NAMES: [n if n != d else "" for n, d in zip(out_names, out_defaults, strict=True)],
                     }
                 )
 
         saved_in = effective_names(entry.options.get(CONF_INPUT_NAMES), in_defaults, legacy_input_names(inputs))
-        saved_out = effective_names(entry.options.get(CONF_OUTPUT_NAMES), out_defaults)
+        saved_out = effective_names(entry.options.get(CONF_OUTPUT_NAMES), out_defaults, legacy_output_names(outputs))
         multiline = TextSelector(TextSelectorConfig(multiline=True))
         schema = vol.Schema(
             {
@@ -239,4 +313,178 @@ class KramerOptionsFlow(OptionsFlow):
                 vol.Required(CONF_OUTPUT_NAMES, default="\n".join(saved_out)): multiline,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="names", data_schema=schema, errors=errors)
+
+    async def async_step_presets(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Choose a slot (every slot is listed, with whether it is occupied on the unit)."""
+        data = self._live_data()
+        if data is None:
+            return self.async_abort(reason="unit_unavailable")
+        if user_input is not None:
+            self._slot = int(user_input["slot"])
+            self._contents.pop(self._slot, None)
+            return await self.async_step_slot()
+
+        await data.client.async_scan_presets()
+        descriptions = self._descriptions()
+        options = [
+            {
+                "value": str(slot),
+                "label": slot_label(slot, data.client.preset_defined.get(slot), descriptions.get(slot)),
+            }
+            for slot in range(1, data.preset_slots + 1)
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required("slot", default=str(self._slot or 1)): SelectSelector(
+                    SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN)
+                )
+            }
+        )
+        return self.async_show_form(step_id="presets", data_schema=schema)
+
+    async def async_step_slot(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Choose what to do with the slot."""
+        data = self._live_data()
+        if data is None:
+            return self.async_abort(reason="unit_unavailable")
+        menu = ["store", "recall", "describe"]
+        if self._slot in self._descriptions():
+            menu.append("forget")
+        menu.append("presets")
+        return self.async_show_menu(
+            step_id="slot", menu_options=menu, description_placeholders=self._placeholders(data)
+        )
+
+    def _scope_field(self, data: KramerData) -> dict[Any, Any]:
+        """Return the 'everything or audio only' field for models with separate audio."""
+        if not data.supports_modes:
+            return {}
+        return {
+            vol.Required("scope", default="all"): SelectSelector(
+                SelectSelectorConfig(
+                    options=["all", "audio"], mode=SelectSelectorMode.LIST, translation_key="preset_scope"
+                )
+            )
+        }
+
+    async def async_step_store(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Store the present routing in the slot, confirming first if it would overwrite."""
+        data = self._live_data()
+        if data is None:
+            return self.async_abort(reason="unit_unavailable")
+        client = data.client
+        try:
+            occupied = await client.async_preset_defined(self._slot)
+        except KramerError:
+            return self.async_abort(reason="unit_unavailable")
+        if occupied:
+            await self._read_contents(data)
+        errors: dict[str, str] = {}
+        placeholders = self._placeholders(data)
+
+        if user_input is not None:
+            if occupied and not user_input.get("confirm"):
+                errors["confirm"] = "confirm_required"
+            else:
+                try:
+                    await client.async_store_preset(self._slot, user_input.get("scope") == "audio")
+                except KramerError as err:
+                    errors["base"] = "command_failed"
+                    placeholders["error"] = str(err)
+                else:
+                    return self.async_abort(reason="preset_stored", description_placeholders=placeholders)
+
+        fields: dict[Any, Any] = self._scope_field(data)
+        if occupied:
+            fields[vol.Required("confirm", default=False)] = BooleanSelector()
+        placeholders["warning"] = (
+            f"**Slot {self._slot:02d} is occupied and storing will overwrite it.** {placeholders['contents']}"
+            if occupied
+            else f"Slot {self._slot:02d} is blank, so nothing will be overwritten."
+        )
+        return self.async_show_form(
+            step_id="store", data_schema=vol.Schema(fields), errors=errors, description_placeholders=placeholders
+        )
+
+    async def async_step_recall(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Recall the slot, after confirmation."""
+        data = self._live_data()
+        if data is None:
+            return self.async_abort(reason="unit_unavailable")
+        client = data.client
+        try:
+            occupied = await client.async_preset_defined(self._slot)
+        except KramerError:
+            return self.async_abort(reason="unit_unavailable")
+        placeholders = self._placeholders(data)
+        if not occupied:
+            return self.async_abort(reason="slot_blank", description_placeholders=placeholders)
+        await self._read_contents(data)
+        placeholders = self._placeholders(data)
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            if not user_input.get("confirm"):
+                errors["confirm"] = "confirm_required"
+            else:
+                try:
+                    await client.async_recall_preset(self._slot, user_input.get("scope") == "audio")
+                except KramerError as err:
+                    errors["base"] = "command_failed"
+                    placeholders["error"] = str(err)
+                else:
+                    return self.async_abort(reason="preset_recalled", description_placeholders=placeholders)
+
+        fields: dict[Any, Any] = self._scope_field(data)
+        fields[vol.Required("confirm", default=False)] = BooleanSelector()
+        return self.async_show_form(
+            step_id="recall", data_schema=vol.Schema(fields), errors=errors, description_placeholders=placeholders
+        )
+
+    async def async_step_describe(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Set the HASS description for the slot (kept in Home Assistant, not on the unit)."""
+        data = self._live_data()
+        if data is None:
+            return self.async_abort(reason="unit_unavailable")
+        descriptions = self._descriptions()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            text = user_input["description"].strip()
+            if error := validate_description(text, self._slot, descriptions):
+                errors["description"] = error
+            else:
+                descriptions[self._slot] = text
+                return self.async_create_entry(
+                    data={**self.config_entry.options, CONF_PRESET_DESCRIPTIONS: serialise_descriptions(descriptions)}
+                )
+        schema = vol.Schema({vol.Required("description", default=descriptions.get(self._slot, "")): TextSelector()})
+        return self.async_show_form(
+            step_id="describe",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders=self._placeholders(data),
+        )
+
+    async def async_step_forget(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Remove the HASS description. The preset on the unit is not touched."""
+        data = self._live_data()
+        if data is None:
+            return self.async_abort(reason="unit_unavailable")
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if not user_input.get("confirm"):
+                errors["confirm"] = "confirm_required"
+            else:
+                descriptions = self._descriptions()
+                descriptions.pop(self._slot, None)
+                return self.async_create_entry(
+                    data={**self.config_entry.options, CONF_PRESET_DESCRIPTIONS: serialise_descriptions(descriptions)}
+                )
+        schema = vol.Schema({vol.Required("confirm", default=False): BooleanSelector()})
+        return self.async_show_form(
+            step_id="forget",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders=self._placeholders(data),
+        )

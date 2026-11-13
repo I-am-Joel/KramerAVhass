@@ -12,6 +12,7 @@ from typing import Any
 
 OTHER = "other"
 MAX_PORTS = 64
+MAX_PRESET_SLOTS = 99
 
 
 @dataclass(frozen=True)
@@ -24,11 +25,13 @@ class KramerModel:
     outputs: int
     supports_modes: bool
     supports_off: bool = True
+    supports_lock: bool = True
+    preset_slots: int = 0
 
 
 MODELS: dict[str, KramerModel] = {
-    "vs-162av-rca": KramerModel("vs-162av-rca", "VS-162AV/RCA", 16, 16, True),
-    "vs-812": KramerModel("vs-812", "VS-812", 8, 1, False, supports_off=False),
+    "vs-162av-rca": KramerModel("vs-162av-rca", "VS-162AV/RCA", 16, 16, True, preset_slots=60),
+    "vs-812": KramerModel("vs-812", "VS-812", 8, 1, False, supports_off=False, supports_lock=False),
 }
 
 # Keys saved by earlier versions, mapped to their current entry.
@@ -53,3 +56,20 @@ def resolve_supports_off(data: Mapping[str, Any]) -> bool:
     """Return whether the model can disconnect an output (unknown models: yes)."""
     key = resolve_model_key(data.get("model"))
     return MODELS[key].supports_off if key else True
+
+
+def resolve_supports_lock(data: Mapping[str, Any]) -> bool:
+    """Return whether the model has a front-panel lock (unknown models: yes)."""
+    key = resolve_model_key(data.get("model"))
+    return MODELS[key].supports_lock if key else True
+
+
+def resolve_preset_slots(data: Mapping[str, Any]) -> int:
+    """Return how many stored-setup slots the unit has (0 = none, also for unknown models)."""
+    key = resolve_model_key(data.get("model"))
+    if key:
+        return MODELS[key].preset_slots
+    try:
+        return max(0, min(MAX_PRESET_SLOTS, int(data.get("preset_slots", 0))))
+    except (TypeError, ValueError):
+        return 0

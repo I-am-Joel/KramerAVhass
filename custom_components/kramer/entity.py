@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -24,6 +24,9 @@ class KramerData:
     output_names: list[str]
     supports_modes: bool
     supports_off: bool = True
+    supports_lock: bool = True
+    preset_slots: int = 0
+    preset_descriptions: dict[int, str] = field(default_factory=dict)
 
 
 type KramerConfigEntry = ConfigEntry[KramerData]

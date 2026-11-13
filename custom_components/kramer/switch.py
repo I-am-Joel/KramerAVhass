@@ -14,8 +14,10 @@ from .entity import KramerConfigEntry, KramerEntity
 async def async_setup_entry(
     hass: HomeAssistant, entry: KramerConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the lock switch."""
-    async_add_entities([KramerLockSwitch(entry)])
+    """Set up the lock switch, only for units that have one."""
+    data = entry.runtime_data
+    if data.supports_lock and data.client.lock_supported is not False:
+        async_add_entities([KramerLockSwitch(entry)])
 
 
 class KramerLockSwitch(KramerEntity, SwitchEntity):

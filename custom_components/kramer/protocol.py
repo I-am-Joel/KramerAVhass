@@ -21,17 +21,25 @@ import contextlib
 import logging
 import socket
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 _LOGGER = logging.getLogger(__name__)
 
 # Instructions used (decimal, from the Protocol 2000 table).
 INSTR_RESET = 0
 INSTR_SWITCH_VIDEO = 1
+INSTR_STORE_VIDEO = 3
+INSTR_RECALL_VIDEO = 4
 INSTR_REQUEST_VIDEO_STATUS = 5
+INSTR_REQUEST_AUDIO_STATUS = 6
 INSTR_BREAKAWAY = 8
 INSTR_REQUEST_BREAKAWAY = 11
+INSTR_REQUEST_DEFINED = 15
 INSTR_ERROR = 16
+INSTR_STORE_AUDIO = 19
+INSTR_RECALL_AUDIO = 20
+INSTR_IDENTIFY = 61
 INSTR_LOCK_PANEL = 30
 INSTR_REQUEST_LOCK = 31
 
@@ -52,6 +60,9 @@ _ERROR_CODES = {
 _NOTIFY_CODES = (4, 5)
 
 _PACKET_SIZE = 4
+
+# How often to re-check which preset slots are occupied (seconds).
+PRESET_SCAN_INTERVAL = 300.0
 
 
 class KramerError(Exception):
@@ -83,6 +94,14 @@ class Packet:
     def hex(self) -> str:
         """Return the packet as hex, for logging."""
         return build_packet(self.instruction, self.input, self.output, self.machine, self.from_unit).hex()
+
+
+@dataclass(frozen=True)
+class PresetContents:
+    """What a stored setup holds: input per output, for video and audio."""
+
+    video: dict[int, int] = field(default_factory=dict)
+    audio: dict[int, int] = field(default_factory=dict)
 
 
 def build_packet(
@@ -212,6 +231,7 @@ class KramerClient:
         outputs: int,
         *,
         supports_modes: bool = True,
+        preset_slots: int = 0,
         refresh_interval: float = 60.0,
         retry_interval: float = 10.0,
         reconnect_delay: float = 5.0,
@@ -224,6 +244,7 @@ class KramerClient:
         self._inputs = inputs
         self._outputs = outputs
         self._supports_modes = supports_modes
+        self._preset_slots = preset_slots
         self._refresh_interval = refresh_interval
         self._retry_interval = retry_interval
         self._reconnect_delay = reconnect_delay
@@ -242,6 +263,14 @@ class KramerClient:
         self.mode: int | None = None
         self.locked: bool | None = None
         self.lock_supported: bool | None = None
+        self.preset_defined: dict[int, bool] = {}
+        self.identity: dict[str, object] = {}
+        self.identity_checked = False
+        self._identity_done = False
+        self.last_reply: datetime | None = None
+        self.last_error: str | None = None
+        self.last_error_time: datetime | None = None
+        self._last_preset_scan = 0.0
 
     # ------------------------------------------------------------------
     # Public state helpers
@@ -256,6 +285,28 @@ class KramerClient:
         if len(values) == 1:
             return values.pop()
         return None
+
+    @property
+    def inputs(self) -> int:
+        """Return the number of inputs."""
+        return self._inputs
+
+    @property
+    def outputs(self) -> int:
+        """Return the number of outputs."""
+        return self._outputs
+
+    @property
+    def preset_slots(self) -> int:
+        """Return the number of stored-setup slots (0 = none)."""
+        return self._preset_slots
+
+    @property
+    def connected_outputs(self) -> int | None:
+        """Return how many outputs are connected to an input."""
+        if len(self.routes) != self._outputs:
+            return None
+        return sum(1 for value in self.routes.values() if value > 0)
 
     def add_listener(self, callback: Callable[[], None]) -> Callable[[], None]:
         """Register a callback for any state change; returns a remover."""
@@ -361,18 +412,19 @@ class KramerClient:
     async def _request(
         self,
         data: bytes,
-        instruction: int,
+        instruction: int | tuple[int, ...],
         extra: Callable[[Packet], bool] | None = None,
         attempts: int = 2,
     ) -> Packet:
         """Send a packet and wait for the unit's reply to it."""
+        accepted = (instruction,) if isinstance(instruction, int) else instruction
 
         def matches(packet: Packet) -> bool:
             if not packet.from_unit:
                 return False
             if packet.instruction == INSTR_ERROR:
                 return (packet.output & 0x7F) in _ERROR_CODES
-            return packet.instruction == instruction and (extra is None or extra(packet))
+            return packet.instruction in accepted and (extra is None or extra(packet))
 
         async with self._lock:
             for attempt in range(attempts):
@@ -399,9 +451,17 @@ class KramerClient:
                     self._pending = None
                 if reply.instruction == INSTR_ERROR:
                     code = reply.output & 0x7F
-                    raise KramerCommandError(f"Unit reported: {_ERROR_CODES.get(code, code)}")
+                    message = f"Unit reported: {_ERROR_CODES.get(code, code)}"
+                    self._record_error(message)
+                    raise KramerCommandError(message)
                 return reply
+        self._record_error("No reply from the unit")
         raise KramerTimeoutError("No reply from the unit")
+
+    def _record_error(self, message: str) -> None:
+        """Remember the latest problem, for the diagnostic sensors."""
+        self.last_error = message
+        self.last_error_time = datetime.now(UTC)
 
     def _fail_pending(self, error: Exception) -> None:
         pending = self._pending
@@ -480,6 +540,7 @@ class KramerClient:
         _LOGGER.debug("Received %s", packet.hex())
         if packet.machine != self._machine or not packet.from_unit:
             return
+        self.last_reply = datetime.now(UTC)
         pending = self._pending
         if pending and not pending[1].done() and pending[0](packet):
             pending[1].set_result(packet)
@@ -564,3 +625,126 @@ class KramerClient:
             self._set_available(True)
         else:
             self._notify()
+        if not self._identity_done:
+            await self._read_identity()
+        await self._scan_presets_if_due()
+
+    async def _identify(self, what: int, which: int) -> Packet:
+        """Ask the identify instruction one question (see note 13 of the protocol document)."""
+        return await self._request(build_packet(INSTR_IDENTIFY, what, which, self._machine), INSTR_IDENTIFY)
+
+    async def _read_identity(self) -> None:
+        """Read the unit's name and software version once per connection, if it answers."""
+        info: dict[str, object] = {}
+        try:
+            reply = await self._identify(1, 0)
+            info["name_raw"] = [reply.input, reply.output]
+            info["number"] = f"{reply.input:02d}{reply.output:02d}".lstrip("0")
+            for key, codes in (("prefix", (10, 11, 12)), ("suffix", (1, 2, 3))):
+                text = ""
+                for code in codes:
+                    reply = await self._identify(1, code)
+                    text += "".join(chr(b) for b in (reply.input, reply.output) if 32 < b < 127)
+                info[key] = text
+            reply = await self._identify(3, 0)
+            info["firmware_raw"] = [reply.input, reply.output]
+            info["firmware"] = f"{reply.input}.{reply.output}"
+            reply = await self._identify(4, 0)
+            info["audio_firmware"] = f"{reply.input}.{reply.output}"
+            reply = await self._identify(9, 0)
+            info["protocol_revision"] = f"{reply.input}.{reply.output}"
+        except (KramerTimeoutError, KramerCommandError) as err:
+            _LOGGER.debug("Unit did not answer every identity question: %s", err)
+        self.identity = info
+        self.identity_checked = True
+        self._identity_done = True
+        self._notify()
+
+    async def _scan_presets_if_due(self, force: bool = False) -> None:
+        """Check which preset slots are occupied, at most every few minutes."""
+        if self._preset_slots <= 0:
+            return
+        now = asyncio.get_running_loop().time()
+        if not force and self._last_preset_scan and now - self._last_preset_scan < PRESET_SCAN_INTERVAL:
+            return
+        found: dict[int, bool] = {}
+        try:
+            for slot in range(1, self._preset_slots + 1):
+                found[slot] = await self.async_preset_defined(slot)
+        except KramerError as err:
+            _LOGGER.debug("Preset scan stopped at slot %s: %s", len(found) + 1, err)
+            return
+        self._last_preset_scan = now
+        self.preset_defined = found
+        self._notify()
+
+    # ------------------------------------------------------------------
+    # Stored setups (presets)
+    # ------------------------------------------------------------------
+
+    async def async_scan_presets(self) -> None:
+        """Re-check which slots are occupied now (about a second or two)."""
+        await self._scan_presets_if_due(force=True)
+
+    def _check_slot(self, slot: int) -> None:
+        if self._preset_slots <= 0:
+            raise KramerCommandError("This model has no stored setups")
+        if not 1 <= slot <= self._preset_slots:
+            raise KramerCommandError(f"Slot {slot} is out of range (1 to {self._preset_slots})")
+
+    async def async_preset_defined(self, slot: int) -> bool:
+        """Ask the unit whether a stored setup exists in a slot."""
+        self._check_slot(slot)
+        reply = await self._request(
+            build_packet(INSTR_REQUEST_DEFINED, slot, 0, self._machine),
+            INSTR_REQUEST_DEFINED,
+            lambda p: p.input == slot,
+        )
+        return reply.output == 1
+
+    async def async_read_preset(self, slot: int) -> PresetContents:
+        """Read what a stored setup holds (32 requests for 16 outputs)."""
+        self._check_slot(slot)
+        video: dict[int, int] = {}
+        audio: dict[int, int] = {}
+        for output in range(1, self._outputs + 1):
+            reply = await self._request(
+                build_packet(INSTR_REQUEST_VIDEO_STATUS, slot, output, self._machine),
+                INSTR_REQUEST_VIDEO_STATUS,
+            )
+            video[output] = reply.output
+            reply = await self._request(
+                build_packet(INSTR_REQUEST_AUDIO_STATUS, slot, output, self._machine),
+                INSTR_REQUEST_AUDIO_STATUS,
+            )
+            audio[output] = reply.output
+        return PresetContents(video, audio)
+
+    async def async_store_preset(self, slot: int, audio_only: bool = False) -> None:
+        """Store the present routing in a slot, overwriting whatever is there.
+
+        Callers must have asked for confirmation first. Storing video saves
+        video, audio and mode together; audio-only saves just the audio routes.
+        """
+        self._check_slot(slot)
+        instruction = INSTR_STORE_AUDIO if audio_only else INSTR_STORE_VIDEO
+        await self._request(
+            build_packet(instruction, slot, 0, self._machine),
+            instruction,
+            lambda p: p.input == slot,
+        )
+        self.preset_defined[slot] = True
+        self._notify()
+
+    async def async_recall_preset(self, slot: int, audio_only: bool = False) -> None:
+        """Recall a stored setup, then re-read everything the unit now holds."""
+        if not await self.async_preset_defined(slot):
+            raise KramerCommandError(f"Slot {slot} is blank")
+        instruction = INSTR_RECALL_AUDIO if audio_only else INSTR_RECALL_VIDEO
+        # The unit acknowledges an audio recall with the video recall code.
+        await self._request(
+            build_packet(instruction, slot, 0, self._machine),
+            (INSTR_RECALL_VIDEO, INSTR_RECALL_AUDIO),
+            lambda p: p.input == slot,
+        )
+        await self._refresh()

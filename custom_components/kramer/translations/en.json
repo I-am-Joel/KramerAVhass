@@ -24,12 +24,13 @@
       },
       "other": {
         "title": "Other model",
-        "description": "Enter the size of your switcher.",
+        "description": "Enter the size of your switcher. If you are not sure about stored setups, leave it at 0 and add it later with Reconfigure.",
         "data": {
           "model_name": "Model name",
           "inputs": "Number of inputs",
           "outputs": "Number of outputs",
-          "supports_modes": "Supports separate audio and video switching"
+          "supports_modes": "Supports separate audio and video switching",
+          "preset_slots": "Stored setups (presets) the unit can hold (0 if none)"
         }
       }
     },
@@ -45,27 +46,187 @@
   "options": {
     "step": {
       "init": {
+        "title": "Kramer options",
+        "menu_options": {
+          "names": "Input and output names",
+          "presets": "Presets (stored setups)"
+        }
+      },
+      "names": {
         "title": "Input and output names",
         "description": "One name per line, in order. Leave a line blank to use the default.",
         "data": {
           "input_names": "Input names",
           "output_names": "Output names"
         }
+      },
+      "presets": {
+        "title": "Presets (stored setups)",
+        "description": "Every slot is listed. Occupied or Blank is read from the unit just now. A description after the dash is a HASS description (not stored on device).",
+        "data": {
+          "slot": "Slot"
+        }
+      },
+      "slot": {
+        "title": "Preset slot {slot}",
+        "description": "Slot {slot} is **{state}** on the unit.\n\nHASS description (not stored on device): {description}",
+        "menu_options": {
+          "store": "Store the present routing in this slot",
+          "recall": "Recall this slot",
+          "describe": "Set or change the HASS description (not stored on device)",
+          "forget": "Forget in HASS – presets on the unit can be overwritten but cannot be deleted",
+          "presets": "Choose a different slot"
+        }
+      },
+      "store": {
+        "title": "Store into slot {slot}",
+        "description": "{warning}\n\nThis stores the present video routing, audio routing and mode (Audio follow video or Breakaway) together. A preset on the unit can be overwritten but never deleted.",
+        "data": {
+          "scope": "What to store",
+          "confirm": "Yes, overwrite this slot"
+        }
+      },
+      "recall": {
+        "title": "Recall slot {slot}",
+        "description": "Slot {slot} will change the routing now. {contents}\n\nA full recall also sets the mode (Audio follow video or Breakaway) that was stored with it.",
+        "data": {
+          "scope": "What to recall",
+          "confirm": "Yes, recall this slot"
+        }
+      },
+      "describe": {
+        "title": "Description for slot {slot}",
+        "description": "This description is kept in Home Assistant only. It is not stored on the unit.",
+        "data": {
+          "description": "HASS description (not stored on device)"
+        }
+      },
+      "forget": {
+        "title": "Forget the description for slot {slot}",
+        "description": "Forget in HASS – presets on the unit can be overwritten but cannot be deleted.\n\nThis removes only the HASS description (\"{description}\"). The setup on the unit is not changed and the slot will still be **{state}**.",
+        "data": {
+          "confirm": "Yes, forget the HASS description"
+        }
       }
     },
     "error": {
       "too_many_names": "More names than the switcher has ports.",
       "duplicate_names": "Names must all be different.",
-      "reserved_name": "Input names cannot be \"Off\" or \"Mixed\"."
+      "reserved_name": "Input names cannot be \"Off\" or \"Mixed\".",
+      "confirm_required": "Tick the box to confirm.",
+      "command_failed": "The unit refused or did not answer: {error}",
+      "description_required": "Enter a description, or go back and choose Forget.",
+      "description_too_long": "Keep the description to 60 characters or fewer.",
+      "description_numeric": "A description cannot be only digits, because digits mean a slot number.",
+      "description_duplicate": "Another slot already has that description."
+    },
+    "abort": {
+      "unit_unavailable": "The unit is not answering, so its presets cannot be shown. Try again when it is connected.",
+      "slot_blank": "Slot {slot} is blank, so there is nothing to recall.",
+      "preset_stored": "Stored the present setup in slot {slot}.",
+      "preset_recalled": "Recalled slot {slot}."
     }
   },
   "entity": {
     "select": {
-      "all_outputs": { "name": "All outputs" },
-      "mode": { "name": "Mode" }
+      "all_outputs": {
+        "name": "All outputs"
+      },
+      "mode": {
+        "name": "Mode"
+      }
     },
     "switch": {
-      "panel_lock": { "name": "Front panel lock" }
+      "panel_lock": {
+        "name": "Front panel lock"
+      }
+    },
+    "binary_sensor": {
+      "connection": {
+        "name": "Connection"
+      }
+    },
+    "sensor": {
+      "last_reply": {
+        "name": "Last reply"
+      },
+      "last_error": {
+        "name": "Last error"
+      },
+      "routing_summary": {
+        "name": "Routing summary"
+      },
+      "connected_outputs": {
+        "name": "Connected outputs"
+      },
+      "disconnected_outputs": {
+        "name": "Disconnected outputs"
+      },
+      "stored_presets": {
+        "name": "Stored presets (occupied slots)"
+      },
+      "identity": {
+        "name": "Unit identity"
+      },
+      "firmware": {
+        "name": "Firmware version"
+      }
+    }
+  },
+  "selector": {
+    "preset_scope": {
+      "options": {
+        "all": "Everything (video, audio and mode)",
+        "audio": "Audio only"
+      }
+    }
+  },
+  "services": {
+    "set_route": {
+      "name": "Set route",
+      "description": "Send one input to one or more outputs. Inputs and outputs can be given by number or by name.",
+      "fields": {
+        "input": {
+          "name": "Input",
+          "description": "Input number or name. Use Off (or 0) to disconnect, on models that can."
+        },
+        "outputs": {
+          "name": "Outputs",
+          "description": "Output numbers or names, or all."
+        }
+      }
+    },
+    "store_preset": {
+      "name": "Store preset",
+      "description": "Store the present setup in a slot. Refuses an occupied slot unless overwriting is confirmed. A stored preset cannot be deleted, only overwritten.",
+      "fields": {
+        "slot": {
+          "name": "Slot",
+          "description": "Slot number, or its HASS description."
+        },
+        "audio_only": {
+          "name": "Audio only",
+          "description": "Store only the audio routes (models with separate audio)."
+        },
+        "confirm_overwrite": {
+          "name": "Confirm overwrite",
+          "description": "Must be true to overwrite an occupied slot."
+        }
+      }
+    },
+    "recall_preset": {
+      "name": "Recall preset",
+      "description": "Recall a stored setup. A full recall also sets the stored mode.",
+      "fields": {
+        "slot": {
+          "name": "Slot",
+          "description": "Slot number, or its HASS description."
+        },
+        "audio_only": {
+          "name": "Audio only",
+          "description": "Recall only the audio routes (models with separate audio)."
+        }
+      }
     }
   }
 }

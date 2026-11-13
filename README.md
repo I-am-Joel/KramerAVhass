@@ -58,14 +58,14 @@ port.
 1. Confirm that your Kramer switcher uses **Protocol 2000** and find its
    serial settings. Kramer units normally use 9600 baud, 8 data bits, no
    parity, 1 stop bit.
-2. Set up your serial-to-Ethernet bridge with matching serial settings, in raw TCP
-   server mode, and give it a fixed IP address. Note the TCP port it listens on.
-3. Check the cable and any null-modem setting. On the VS-162AV and
-   VS-162AVRCA, a DIP switch on the rear defines whether a null-modem adapter is
-   required. If the unit stays silent, this is the first thing to check. Some Kramer units don't offer this switch and you may find a null-modem adapter is or isn't required
+2. Set up your Ethernet-to-serial bridge with matching serial settings, in raw TCP
+   server mode, and give it a unique, fixed IP address. Note the TCP port it listens on.
+3. Check the cable and any null-modem setting. On the VS-162AV, a DIP switch on the rear defines whether a null-modem adapter is
+   required or a straight-through cable will work, on other models this cannot be defined and you must either use a null-modem cable or a null-modem adaptor with a straight-through cable. If the unit stays silent, this is the first thing to check.
 4. Check the unit's **machine number**. A single unit is normally number 1. Daisy-chained units will each have a different number (see limitations, below).
 5. Keep Home Assistant and the bridge on a network path that does not block or
    isolate the devices from one other.
+6. If you need to change a bridge's settings, first disable the integration entry in HASS to prevent a conflict with the integration, as it is otherwise designed to hold its connection to the bridge open.
 
 ## Installation
 

@@ -24,13 +24,13 @@
       },
       "other": {
         "title": "Other model",
-        "description": "Enter the size of your switcher. If you are not sure about stored setups, leave it at 0 and add it later with Reconfigure.",
+        "description": "Enter the size of your switcher. If you are not sure about presets, leave it at 0 and add it later with Reconfigure.",
         "data": {
           "model_name": "Model name",
           "inputs": "Number of inputs",
           "outputs": "Number of outputs",
           "supports_modes": "Supports separate audio and video switching",
-          "preset_slots": "Stored setups (presets) the unit can hold (0 if none)"
+          "preset_slots": "Number of presets the unit can store (0 if none)"
         }
       }
     },
@@ -49,7 +49,7 @@
         "title": "Kramer options",
         "menu_options": {
           "names": "Input and output names",
-          "presets": "Presets (stored setups)"
+          "presets": "Presets"
         }
       },
       "names": {
@@ -61,49 +61,49 @@
         }
       },
       "presets": {
-        "title": "Presets (stored setups)",
-        "description": "Every slot is listed. Occupied or Blank is read from the unit just now. A description after the dash is a HASS description (not stored on device).",
+        "title": "Presets",
+        "description": "Every preset is listed. Occupied or Blank is read from the unit just now. A description after the dash is a HASS description (not stored on device).",
         "data": {
-          "slot": "Slot"
+          "preset": "Preset"
         }
       },
       "slot": {
-        "title": "Preset slot {slot}",
-        "description": "Slot {slot} is **{state}** on the unit.\n\nHASS description (not stored on device): {description}",
+        "title": "Preset",
+        "description": "Preset {preset} is **{state}** on the unit.\n\nHASS description (not stored on device): {description}",
         "menu_options": {
-          "store": "Store the present routing in this slot",
-          "recall": "Recall this slot",
+          "store": "Store the present routing in this preset",
+          "recall": "Recall this preset",
           "describe": "Set or change the HASS description (not stored on device)",
           "forget": "Forget in HASS – presets on the unit can be overwritten but cannot be deleted",
-          "presets": "Choose a different slot"
+          "presets": "Choose a different preset"
         }
       },
       "store": {
-        "title": "Store into slot {slot}",
+        "title": "Store a preset",
         "description": "{warning}\n\nThis stores the present video routing, audio routing and mode (Audio follow video or Breakaway) together. A preset on the unit can be overwritten but never deleted.",
         "data": {
           "scope": "What to store",
-          "confirm": "Yes, overwrite this slot"
+          "confirm": "Yes, overwrite this preset"
         }
       },
       "recall": {
-        "title": "Recall slot {slot}",
-        "description": "Slot {slot} will change the routing now. {contents}\n\nA full recall also sets the mode (Audio follow video or Breakaway) that was stored with it.",
+        "title": "Recall a preset",
+        "description": "Recalling preset {preset} will change the routing now. {contents}\n\nA full recall also sets the mode (Audio follow video or Breakaway) that was stored with it.",
         "data": {
           "scope": "What to recall",
-          "confirm": "Yes, recall this slot"
+          "confirm": "Yes, recall this preset"
         }
       },
       "describe": {
-        "title": "Description for slot {slot}",
-        "description": "This description is kept in Home Assistant only. It is not stored on the unit.",
+        "title": "Describe a preset",
+        "description": "This description is for preset {preset}. It is kept in Home Assistant only. It is not stored on the unit.",
         "data": {
           "description": "HASS description (not stored on device)"
         }
       },
       "forget": {
-        "title": "Forget the description for slot {slot}",
-        "description": "Forget in HASS – presets on the unit can be overwritten but cannot be deleted.\n\nThis removes only the HASS description (\"{description}\"). The setup on the unit is not changed and the slot will still be **{state}**.",
+        "title": "Forget a HASS description",
+        "description": "Forget in HASS – presets on the unit can be overwritten but cannot be deleted.\n\nThis removes only the HASS description (\"{description}\") for preset {preset}. The preset on the unit is not changed and it will still be **{state}**.",
         "data": {
           "confirm": "Yes, forget the HASS description"
         }
@@ -117,14 +117,14 @@
       "command_failed": "The unit refused or did not answer: {error}",
       "description_required": "Enter a description, or go back and choose Forget.",
       "description_too_long": "Keep the description to 60 characters or fewer.",
-      "description_numeric": "A description cannot be only digits, because digits mean a slot number.",
-      "description_duplicate": "Another slot already has that description."
+      "description_numeric": "A description cannot be only digits, because digits mean a preset number.",
+      "description_duplicate": "Another preset already has that description."
     },
     "abort": {
       "unit_unavailable": "The unit is not answering, so its presets cannot be shown. Try again when it is connected.",
-      "slot_blank": "Slot {slot} is blank, so there is nothing to recall.",
-      "preset_stored": "Stored the present setup in slot {slot}.",
-      "preset_recalled": "Recalled slot {slot}."
+      "slot_blank": "Preset {preset} is blank, so there is nothing to recall.",
+      "preset_stored": "Stored the present setup in preset {preset}.",
+      "preset_recalled": "Recalled preset {preset}."
     }
   },
   "entity": {
@@ -163,7 +163,7 @@
         "name": "Disconnected outputs"
       },
       "stored_presets": {
-        "name": "Stored presets (occupied slots)"
+        "name": "Stored presets (occupied only)"
       },
       "identity": {
         "name": "Unit identity"
@@ -198,11 +198,11 @@
     },
     "store_preset": {
       "name": "Store preset",
-      "description": "Store the present setup in a slot. Refuses an occupied slot unless overwriting is confirmed. A stored preset cannot be deleted, only overwritten.",
+      "description": "Store the present setup in a preset. Refuses an occupied preset unless overwriting is confirmed. A stored preset cannot be deleted, only overwritten.",
       "fields": {
-        "slot": {
-          "name": "Slot",
-          "description": "Slot number, or its HASS description."
+        "preset": {
+          "name": "Preset",
+          "description": "Preset number, or its HASS description."
         },
         "audio_only": {
           "name": "Audio only",
@@ -210,17 +210,17 @@
         },
         "confirm_overwrite": {
           "name": "Confirm overwrite",
-          "description": "Must be true to overwrite an occupied slot."
+          "description": "Must be true to overwrite an occupied preset."
         }
       }
     },
     "recall_preset": {
       "name": "Recall preset",
-      "description": "Recall a stored setup. A full recall also sets the stored mode.",
+      "description": "Recall a stored preset. A full recall also sets the stored mode.",
       "fields": {
-        "slot": {
-          "name": "Slot",
-          "description": "Slot number, or its HASS description."
+        "preset": {
+          "name": "Preset",
+          "description": "Preset number, or its HASS description."
         },
         "audio_only": {
           "name": "Audio only",

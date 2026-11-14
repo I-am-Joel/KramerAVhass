@@ -183,7 +183,8 @@ More models can be added to `custom_components/kramer/models.py`.
 
 - "Set route" action option for HASS automations (hopefully soon).
 - Separate video and audio routing options in Breakaway mode (hopefully soon).
-- Supporting multiple daisy-chained units on a single connection (may not be possible).
+- Additional protocol variant to enable control of Kramer presentation scalers (hopefully soon).
+- Supporting multiple daisy-chained units on a single connection (may not be worthwhile and/or possible).
 - A model-definition wizard so users can contribute model profiles to the project through GitHub (for the future).
 - More models predefined, if I can access and test them.
 

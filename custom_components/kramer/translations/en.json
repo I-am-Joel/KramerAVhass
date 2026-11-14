@@ -24,7 +24,7 @@
       },
       "other": {
         "title": "Other model",
-        "description": "Enter the size of your switcher. If you are not sure about presets, leave it at 0 and add it later with Reconfigure.",
+        "description": "Configure your switcher. If you don't know how many presets it supports you can leave it at 0 and change it later using \"Reconfigure\".",
         "data": {
           "model_name": "Model name",
           "inputs": "Number of inputs",
@@ -54,9 +54,10 @@
       },
       "names": {
         "title": "Input and output names",
-        "description": "One name per line, in order. Leave a line blank to use the default.",
+        "description": "One name per line, in order. Leave a line blank to use the default. Units with separate video and audio have a name list for each; an output's name gets \"Video\" or \"Audio\" added in Home Assistant.",
         "data": {
-          "input_names": "Input names",
+          "input_names": "Video input names (or input names)",
+          "audio_input_names": "Audio input names",
           "output_names": "Output names"
         }
       },
@@ -179,12 +180,19 @@
         "all": "Everything (video, audio and mode)",
         "audio": "Audio only"
       }
+    },
+    "layer": {
+      "options": {
+        "both": "Video and audio",
+        "video": "Video only",
+        "audio": "Audio only"
+      }
     }
   },
   "services": {
     "set_route": {
       "name": "Set route",
-      "description": "Send one input to one or more outputs. Inputs and outputs can be given by number or by name.",
+      "description": "Send one input to one or more outputs. Inputs and outputs can be given by number or by name. On units with separate audio, choose whether to move video, audio or both.",
       "fields": {
         "input": {
           "name": "Input",
@@ -193,6 +201,10 @@
         "outputs": {
           "name": "Outputs",
           "description": "Output numbers or names, or all."
+        },
+        "layer": {
+          "name": "Layer",
+          "description": "Video and audio (default), video only, or audio only. Audio alone needs Breakaway mode."
         }
       }
     },

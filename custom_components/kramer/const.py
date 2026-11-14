@@ -15,6 +15,7 @@ CONF_PRESET_SLOTS = "preset_slots"
 CONF_PRESET_DESCRIPTIONS = "preset_descriptions"
 
 CONF_INPUT_NAMES = "input_names"
+CONF_AUDIO_INPUT_NAMES = "audio_input_names"
 CONF_OUTPUT_NAMES = "output_names"
 
 DEFAULT_PORT = 9001

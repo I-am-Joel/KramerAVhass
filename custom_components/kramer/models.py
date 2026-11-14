@@ -31,6 +31,7 @@ class KramerModel:
 
 MODELS: dict[str, KramerModel] = {
     "vs-162av-rca": KramerModel("vs-162av-rca", "VS-162AV/RCA", 16, 16, True, preset_slots=60),
+    "vs-808yc": KramerModel("vs-808yc", "VS-808YC", 8, 8, True, preset_slots=16),
     "vs-812": KramerModel("vs-812", "VS-812", 8, 1, False, supports_off=False, supports_lock=False),
 }
 

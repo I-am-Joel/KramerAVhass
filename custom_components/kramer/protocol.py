@@ -29,6 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 # Instructions used (decimal, from the Protocol 2000 table).
 INSTR_RESET = 0
 INSTR_SWITCH_VIDEO = 1
+INSTR_SWITCH_AUDIO = 2
 INSTR_STORE_VIDEO = 3
 INSTR_RECALL_VIDEO = 4
 INSTR_REQUEST_VIDEO_STATUS = 5
@@ -260,9 +261,11 @@ class KramerClient:
 
         self.available = False
         self.routes: dict[int, int] = {}
+        self.audio_routes: dict[int, int] = {}
         self.mode: int | None = None
         self.locked: bool | None = None
         self.lock_supported: bool | None = None
+        self.audio_supported: bool | None = None
         self.preset_defined: dict[int, bool] = {}
         self.identity: dict[str, object] = {}
         self.identity_checked = False
@@ -300,6 +303,28 @@ class KramerClient:
     def preset_slots(self) -> int:
         """Return the number of stored-setup slots (0 = none)."""
         return self._preset_slots
+
+    @property
+    def common_all(self) -> int | None:
+        """Return the input feeding every output for video and audio, or None if anything differs."""
+        video = self.common_input
+        if video is None:
+            return None
+        if not self._supports_modes or not self.audio_routes:
+            return video
+        if len(self.audio_routes) == self._outputs and set(self.audio_routes.values()) == {video}:
+            return video
+        return None
+
+    def in_step(self, output: int) -> bool | None:
+        """Return whether an output's audio comes from the same input as its video (None if unknown)."""
+        if not self._supports_modes:
+            return None
+        video = self.routes.get(output)
+        audio = self.audio_routes.get(output)
+        if video is None or audio is None:
+            return None
+        return video == audio
 
     @property
     def connected_outputs(self) -> int | None:
@@ -381,7 +406,35 @@ class KramerClient:
             lambda p: p.input == input_number and p.output == output,
         )
         self._apply_route(output, input_number)
+        if self._supports_modes and self.mode == MODE_AFV:
+            self._apply_audio_route(output, input_number)
         self._notify()
+
+    async def async_set_audio_route(self, output: int, input_number: int) -> None:
+        """Route an input's audio to one output (output 0 = all outputs).
+
+        In Audio follow video mode the unit moves video as well, so callers
+        should only use this in breakaway mode.
+        """
+        if not 0 <= output <= self._outputs:
+            raise KramerError(f"Output {output} is out of range")
+        if not 0 <= input_number <= self._inputs:
+            raise KramerError(f"Input {input_number} is out of range")
+        await self._request(
+            build_packet(INSTR_SWITCH_AUDIO, input_number, output, self._machine),
+            INSTR_SWITCH_AUDIO,
+            lambda p: p.input == input_number and p.output == output,
+        )
+        self._apply_audio_route(output, input_number)
+        if self.mode == MODE_AFV:
+            self._apply_route(output, input_number)
+        self._notify()
+
+    async def async_set_all_layers(self, output: int, input_number: int) -> None:
+        """Route an input to an output for video and, if the unit is in breakaway mode, audio too."""
+        await self.async_set_route(output, input_number)
+        if self._supports_modes and self.mode != MODE_AFV:
+            await self.async_set_audio_route(output, input_number)
 
     async def async_set_mode(self, mode: int) -> None:
         """Set audio-follow-video (0) or breakaway (1) mode."""
@@ -390,6 +443,10 @@ class KramerClient:
             INSTR_BREAKAWAY,
         )
         self.mode = reply.output
+        if self.mode == MODE_AFV:
+            # The unit makes audio follow video at once; read it back to be sure.
+            self.audio_routes = dict(self.routes)
+            self._refresh_event.set()
         self._notify()
         if reply.output != mode:
             raise KramerCommandError(f"The unit stayed in mode {reply.output} instead of {mode}")
@@ -545,7 +602,10 @@ class KramerClient:
     def _dispatch(self, packet: Packet) -> None:
         """Hand a packet to whoever is waiting for it, or treat it as an event."""
         _LOGGER.debug("Received %s", packet.hex())
-        if packet.machine != self._machine or not packet.from_unit:
+        if packet.machine != self._machine:
+            return
+        # The VS-808YC announces front-panel lock changes without the "from the unit" marker.
+        if not packet.from_unit and packet.instruction != INSTR_LOCK_PANEL:
             return
         self.last_reply = datetime.now(UTC)
         pending = self._pending
@@ -559,13 +619,28 @@ class KramerClient:
         instruction = packet.instruction
         if instruction == INSTR_SWITCH_VIDEO:
             self._apply_route(packet.output, packet.input)
+            if self._supports_modes and self.mode == MODE_AFV:
+                # In Audio follow video the unit announces only the video route.
+                self._apply_audio_route(packet.output, packet.input)
+            self._notify()
+        elif instruction == INSTR_SWITCH_AUDIO:
+            self._apply_audio_route(packet.output, packet.input)
             self._notify()
         elif instruction == INSTR_BREAKAWAY and packet.input == 0:
+            previous = self.mode
             self.mode = packet.output
+            if previous != self.mode:
+                self._refresh_event.set()  # audio may have been re-synchronised
             self._notify()
         elif instruction == INSTR_LOCK_PANEL:
             self.locked = packet.input == 1
             self._notify()
+        elif instruction in (INSTR_STORE_VIDEO, INSTR_STORE_AUDIO):
+            self._on_panel_store(packet)
+        elif instruction in (INSTR_RECALL_VIDEO, INSTR_RECALL_AUDIO):
+            # A recalled setup changes routes (and possibly the mode), so read them again.
+            _LOGGER.debug("Unit announced a recall of setup %s; refreshing", packet.input)
+            self._refresh_event.set()
         elif instruction == INSTR_RESET:
             _LOGGER.debug("Unit sent a reset code; refreshing")
             self._refresh_event.set()
@@ -577,6 +652,22 @@ class KramerClient:
                 _LOGGER.debug("Unit sent error packet with code %s", code)
         else:
             _LOGGER.debug("Ignoring packet %s", packet.hex())
+
+    def _on_panel_store(self, packet: Packet) -> None:
+        """Note a setup stored (output 0) or deleted (output 1) from the front panel."""
+        slot = packet.input
+        if self._preset_slots > 0 and 1 <= slot <= self._preset_slots:
+            self.preset_defined = {**self.preset_defined, slot: packet.output == 0}
+            self._last_preset_scan = 0.0  # confirm with a fresh scan at the next refresh
+            self._notify()
+            self._refresh_event.set()
+
+    def _apply_audio_route(self, output: int, input_number: int) -> None:
+        """Record an audio route (output 0 means every output)."""
+        if output == 0:
+            self.audio_routes = dict.fromkeys(range(1, self._outputs + 1), input_number)
+        elif 1 <= output <= self._outputs:
+            self.audio_routes[output] = input_number
 
     def _apply_route(self, output: int, input_number: int) -> None:
         """Record a route (output 0 means every output)."""
@@ -594,6 +685,27 @@ class KramerClient:
                 INSTR_REQUEST_VIDEO_STATUS,
             )
             routes[output] = reply.output
+
+        audio: dict[int, int] = {}
+        if self._supports_modes and self.audio_supported is not False:
+            for output in range(1, self._outputs + 1):
+                try:
+                    reply = await self._request(
+                        build_packet(INSTR_REQUEST_AUDIO_STATUS, 0, output, self._machine),
+                        INSTR_REQUEST_AUDIO_STATUS,
+                        quiet=self.audio_supported is not True and output == 1,
+                    )
+                except (KramerCommandError, KramerTimeoutError):
+                    if self.audio_supported or output > 1:
+                        raise
+                    # Never answered, though the video reads just worked: this unit
+                    # does not report audio routes separately.
+                    _LOGGER.debug("Unit does not report audio routes")
+                    self.audio_supported = False
+                    audio = {}
+                    break
+                audio[output] = reply.output
+                self.audio_supported = True
 
         mode = self.mode
         if self._supports_modes:
@@ -626,6 +738,7 @@ class KramerClient:
                 self.lock_supported = True
 
         self.routes = routes
+        self.audio_routes = audio
         self.mode = mode
         self.locked = locked
         self._ready.set()

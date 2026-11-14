@@ -33,6 +33,7 @@ from . import (
     legacy_output_names,
 )
 from .const import (
+    CONF_AUDIO_INPUT_NAMES,
     CONF_HOST,
     CONF_INPUT_NAMES,
     CONF_INPUTS,
@@ -71,7 +72,7 @@ def _number(minimum: int, maximum: int) -> NumberSelector:
 
 def _model_selector() -> SelectSelector:
     options = [{"value": k, "label": m.name} for k, m in MODELS.items()]
-    options.append({"value": OTHER, "label": "Other (enter the size yourself)"})
+    options.append({"value": OTHER, "label": "Other (configure yourself on the next page)"})
     return SelectSelector(SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN))
 
 
@@ -276,44 +277,56 @@ class KramerOptionsFlow(OptionsFlow):
         return await self.async_step_names()
 
     async def async_step_names(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Edit the names, one per line."""
+        """Edit the names, one per line (units with separate audio also have audio input names)."""
         entry = self.config_entry
         inputs, outputs = int(entry.data[CONF_INPUTS]), int(entry.data[CONF_OUTPUTS])
-        in_defaults, out_defaults = default_input_names(inputs), default_output_names(outputs)
+        breakaway = bool(entry.data.get(CONF_MODES, True))
+        in_defaults = default_input_names(inputs, " Video" if breakaway else "")
+        audio_defaults = default_input_names(inputs, " Audio")
+        out_defaults = default_output_names(outputs)
         errors: dict[str, str] = {}
+
+        def check_inputs(key: str, names: list[str], error: str | None) -> None:
+            if error:
+                errors[key] = error
+            elif {n.casefold() for n in names} & {SOURCE_OFF.casefold(), SOURCE_MIXED.casefold()}:
+                errors[key] = "reserved_name"
+            elif len({n.casefold() for n in names}) != len(names):
+                errors[key] = "duplicate_names"
 
         if user_input is not None:
             in_names, err_in = _parse_names(user_input[CONF_INPUT_NAMES], in_defaults)
             out_names, err_out = _parse_names(user_input[CONF_OUTPUT_NAMES], out_defaults)
-            if err_in:
-                errors[CONF_INPUT_NAMES] = err_in
-            elif {n.casefold() for n in in_names} & {SOURCE_OFF.casefold(), SOURCE_MIXED.casefold()}:
-                errors[CONF_INPUT_NAMES] = "reserved_name"
-            elif len({n.casefold() for n in in_names}) != len(in_names):
-                errors[CONF_INPUT_NAMES] = "duplicate_names"
+            check_inputs(CONF_INPUT_NAMES, in_names, err_in)
+            audio_names: list[str] = []
+            if breakaway:
+                audio_names, err_audio = _parse_names(user_input[CONF_AUDIO_INPUT_NAMES], audio_defaults)
+                check_inputs(CONF_AUDIO_INPUT_NAMES, audio_names, err_audio)
             if err_out:
                 errors[CONF_OUTPUT_NAMES] = err_out
             elif len({n.casefold() for n in out_names}) != len(out_names):
                 errors[CONF_OUTPUT_NAMES] = "duplicate_names"
             if not errors:
-                return self.async_create_entry(
-                    data={
-                        **entry.options,
-                        CONF_INPUT_NAMES: [n if n != d else "" for n, d in zip(in_names, in_defaults, strict=True)],
-                        CONF_OUTPUT_NAMES: [n if n != d else "" for n, d in zip(out_names, out_defaults, strict=True)],
-                    }
-                )
+                saved = {
+                    **entry.options,
+                    CONF_INPUT_NAMES: [n if n != d else "" for n, d in zip(in_names, in_defaults, strict=True)],
+                    CONF_OUTPUT_NAMES: [n if n != d else "" for n, d in zip(out_names, out_defaults, strict=True)],
+                }
+                if breakaway:
+                    saved[CONF_AUDIO_INPUT_NAMES] = [
+                        n if n != d else "" for n, d in zip(audio_names, audio_defaults, strict=True)
+                    ]
+                return self.async_create_entry(data=saved)
 
         saved_in = effective_names(entry.options.get(CONF_INPUT_NAMES), in_defaults, legacy_input_names(inputs))
         saved_out = effective_names(entry.options.get(CONF_OUTPUT_NAMES), out_defaults, legacy_output_names(outputs))
         multiline = TextSelector(TextSelectorConfig(multiline=True))
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_INPUT_NAMES, default="\n".join(saved_in)): multiline,
-                vol.Required(CONF_OUTPUT_NAMES, default="\n".join(saved_out)): multiline,
-            }
-        )
-        return self.async_show_form(step_id="names", data_schema=schema, errors=errors)
+        fields: dict[Any, Any] = {vol.Required(CONF_INPUT_NAMES, default="\n".join(saved_in)): multiline}
+        if breakaway:
+            saved_audio = effective_names(entry.options.get(CONF_AUDIO_INPUT_NAMES), audio_defaults)
+            fields[vol.Required(CONF_AUDIO_INPUT_NAMES, default="\n".join(saved_audio))] = multiline
+        fields[vol.Required(CONF_OUTPUT_NAMES, default="\n".join(saved_out))] = multiline
+        return self.async_show_form(step_id="names", data_schema=vol.Schema(fields), errors=errors)
 
     async def async_step_presets(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Choose a slot (every slot is listed, with whether it is occupied on the unit)."""

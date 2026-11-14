@@ -13,6 +13,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
+    CONF_AUDIO_INPUT_NAMES,
     CONF_HOST,
     CONF_INPUT_NAMES,
     CONF_INPUTS,
@@ -39,9 +40,9 @@ CONFIG_SCHEMA: vol.Schema = cv.config_entry_only_config_schema(DOMAIN)
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.MEDIA_PLAYER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
 
 
-def default_input_names(count: int) -> list[str]:
-    """Return Input 001, Input 002 ..."""
-    return [f"Input {i:03d}" for i in range(1, count + 1)]
+def default_input_names(count: int, suffix: str = "") -> list[str]:
+    """Return Input 001, Input 002 ... (with a suffix such as " Video" if given)."""
+    return [f"Input {i:03d}{suffix}" for i in range(1, count + 1)]
 
 
 def default_output_names(count: int) -> list[str]:
@@ -67,7 +68,7 @@ def effective_names(
 
 def legacy_input_names(count: int) -> list[set[str]]:
     """Return the earlier default names for each input: 01, then Input 01."""
-    return [{f"{i:02d}", f"Input {i:02d}"} for i in range(1, count + 1)]
+    return [{f"{i:02d}", f"Input {i:02d}", f"Input {i:03d}"} for i in range(1, count + 1)]
 
 
 def legacy_output_names(count: int) -> list[set[str]]:
@@ -94,6 +95,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         ) from err
 
     preset_slots = resolve_preset_slots(data)
+    breakaway = bool(data.get(CONF_MODES, True))
     client = KramerClient(
         data[CONF_HOST],
         int(data.get(CONF_PORT, DEFAULT_PORT)),
@@ -107,7 +109,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         client=client,
         model_name=resolve_model_name(data),
         input_names=effective_names(
-            entry.options.get(CONF_INPUT_NAMES), default_input_names(inputs), legacy_input_names(inputs)
+            entry.options.get(CONF_INPUT_NAMES),
+            default_input_names(inputs, " Video" if breakaway else ""),
+            legacy_input_names(inputs),
+        ),
+        audio_input_names=(
+            effective_names(entry.options.get(CONF_AUDIO_INPUT_NAMES), default_input_names(inputs, " Audio"))
+            if breakaway
+            else []
         ),
         output_names=effective_names(
             entry.options.get(CONF_OUTPUT_NAMES), default_output_names(outputs), legacy_output_names(outputs)

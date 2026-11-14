@@ -15,7 +15,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import DOMAIN, SOURCE_OFF
 from .entity import KramerConfigEntry, KramerData
 from .presets import resolve_slot
-from .protocol import KramerError
+from .protocol import MODE_AFV, KramerError
 
 SERVICE_SET_ROUTE = "set_route"
 SERVICE_STORE_PRESET = "store_preset"
@@ -23,6 +23,7 @@ SERVICE_RECALL_PRESET = "recall_preset"
 
 ATTR_INPUT = "input"
 ATTR_OUTPUTS = "outputs"
+ATTR_LAYER = "layer"
 ATTR_SLOT = "preset"
 ATTR_AUDIO_ONLY = "audio_only"
 ATTR_CONFIRM_OVERWRITE = "confirm_overwrite"
@@ -33,6 +34,7 @@ _SET_ROUTE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_INPUT): cv.string,
         vol.Required(ATTR_OUTPUTS): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional(ATTR_LAYER, default="both"): vol.In(["both", "video", "audio"]),
     }
 ).extend(cv.TARGET_SERVICE_FIELDS)
 
@@ -93,9 +95,10 @@ def _resolve_input(data: KramerData, token: str) -> int:
         if 0 <= number <= len(data.input_names):
             return number
         raise ServiceValidationError(f"Input {number} does not exist (1 to {len(data.input_names)})")
-    for index, name in enumerate(data.input_names, start=1):
-        if name.casefold() == text.casefold():
-            return index
+    for names in (data.input_names, data.audio_input_names):
+        for index, name in enumerate(names, start=1):
+            if name.casefold() == text.casefold():
+                return index
     raise ServiceValidationError(f'No input is named "{text}"')
 
 
@@ -150,10 +153,24 @@ async def _handle_set_route(hass: HomeAssistant, call: ServiceCall) -> None:
         data = entry.runtime_data
         input_number = _resolve_input(data, call.data[ATTR_INPUT])
         outputs = _resolve_outputs(data, call.data[ATTR_OUTPUTS])
+        layer = call.data[ATTR_LAYER]
+        if layer == "audio":
+            if not data.has_audio:
+                raise ServiceValidationError(f"{data.model_name} has no separate audio")
+            if data.client.mode == MODE_AFV:
+                raise ServiceValidationError(
+                    "Switch the mode to Breakaway first. In Audio follow video the unit moves audio "
+                    "together with video, so audio cannot be changed on its own."
+                )
         done: list[int] = []
         for output in outputs:
             try:
-                await data.client.async_set_route(output, input_number)
+                if layer == "audio":
+                    await data.client.async_set_audio_route(output, input_number)
+                elif layer == "video":
+                    await data.client.async_set_route(output, input_number)
+                else:
+                    await data.client.async_set_all_layers(output, input_number)
             except KramerError as err:
                 if done:
                     raise HomeAssistantError(

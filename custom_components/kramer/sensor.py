@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import SOURCE_MIXED
-from .entity import KramerConfigEntry, KramerEntity, input_to_name
+from .entity import KramerConfigEntry, KramerEntity, audio_input_to_name, input_to_name
 
 
 async def async_setup_entry(
@@ -137,9 +137,9 @@ class KramerLastErrorSensor(_DiagnosticSensor):
         super().__init__(entry, "last_error")
 
     @property
-    def native_value(self) -> str | None:
-        """Return the latest error, if any."""
-        return self._client.last_error
+    def native_value(self) -> str:
+        """Return the latest error, or None if there has not been one."""
+        return self._client.last_error or "None"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -169,7 +169,7 @@ class KramerRoutingSensor(_RoutingBase):
     @property
     def native_value(self) -> str | None:
         """Return a short summary."""
-        common = self._client.common_input
+        common = self._client.common_all
         if common is None:
             return SOURCE_MIXED
         return f"All from {input_to_name(self._data, common)}" if common else "All off"
@@ -177,8 +177,17 @@ class KramerRoutingSensor(_RoutingBase):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return every output with its source."""
+        client = self._client
+        if not self._data.has_audio or not client.audio_routes:
+            return {
+                name: input_to_name(self._data, client.routes.get(index))
+                for index, name in enumerate(self._data.output_names, start=1)
+            }
         return {
-            name: input_to_name(self._data, self._client.routes.get(index))
+            name: (
+                f"Video: {input_to_name(self._data, client.routes.get(index))}; "
+                f"Audio: {audio_input_to_name(self._data, client.audio_routes.get(index))}"
+            )
             for index, name in enumerate(self._data.output_names, start=1)
         }
 

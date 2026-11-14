@@ -27,6 +27,17 @@ class KramerData:
     supports_lock: bool = True
     preset_slots: int = 0
     preset_descriptions: dict[int, str] = field(default_factory=dict)
+    audio_input_names: list[str] = field(default_factory=list)
+
+    @property
+    def breakaway(self) -> bool:
+        """Return whether this model can route audio and video separately."""
+        return self.supports_modes
+
+    @property
+    def has_audio(self) -> bool:
+        """Return whether separate audio routing is available (the unit has not shown it lacks it)."""
+        return self.supports_modes and self.client.audio_supported is not False
 
 
 type KramerConfigEntry = ConfigEntry[KramerData]
@@ -37,6 +48,42 @@ def source_options(data: KramerData) -> list[str]:
     if data.supports_off:
         return [*data.input_names, SOURCE_OFF]
     return list(data.input_names)
+
+
+def audio_source_options(data: KramerData) -> list[str]:
+    """Return the selectable audio sources: every audio input name plus Off."""
+    if data.supports_off:
+        return [*data.audio_input_names, SOURCE_OFF]
+    return list(data.audio_input_names)
+
+
+def audio_input_to_name(data: KramerData, number: int | None) -> str | None:
+    """Convert an input number to its audio name (0 = Off)."""
+    if number is None:
+        return None
+    if number == 0:
+        return SOURCE_OFF
+    if 1 <= number <= len(data.audio_input_names):
+        return data.audio_input_names[number - 1]
+    return None
+
+
+def audio_name_to_input(data: KramerData, name: str) -> int:
+    """Convert an audio source name to an input number (Off = 0)."""
+    if name == SOURCE_OFF:
+        return 0
+    return data.audio_input_names.index(name) + 1
+
+
+LINK_ICON = "mdi:link"
+UNLINK_ICON = "mdi:link-off"
+
+
+def link_icon(in_step: bool | None) -> str | None:
+    """Return the chain icon for video and audio being in step (or not)."""
+    if in_step is None:
+        return None
+    return LINK_ICON if in_step else UNLINK_ICON
 
 
 def source_options_with_mixed(data: KramerData) -> list[str]:

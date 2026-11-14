@@ -15,6 +15,7 @@ from .entity import (
     KramerConfigEntry,
     KramerEntity,
     input_to_name,
+    link_icon,
     name_to_input,
     reject_mixed,
     source_options_with_mixed,
@@ -52,10 +53,20 @@ class KramerMediaPlayer(KramerEntity, MediaPlayerEntity):
     @property
     def source(self) -> str:
         """Return the common source, Off, or Mixed."""
-        return input_to_name(self._data, self._client.common_input) or SOURCE_MIXED
+        return input_to_name(self._data, self._client.common_all) or SOURCE_MIXED
+
+    @property
+    def icon(self) -> str | None:
+        """Show a linked chain while every output has audio and video in step."""
+        if not self._data.has_audio:
+            return None
+        steps = [self._client.in_step(output) for output in range(1, self._client.outputs + 1)]
+        if None in steps:
+            return None
+        return link_icon(all(steps))
 
     async def async_select_source(self, source: str) -> None:
-        """Send a source to all outputs."""
+        """Send a source to all outputs, for video and (in breakaway mode) audio."""
         if source == SOURCE_MIXED:
             reject_mixed()
-        await self._call(self._client.async_set_route(0, name_to_input(self._data, source)))
+        await self._call(self._client.async_set_all_layers(0, name_to_input(self._data, source)))

@@ -23,7 +23,7 @@ SERVICE_RECALL_PRESET = "recall_preset"
 
 ATTR_INPUT = "input"
 ATTR_OUTPUTS = "outputs"
-ATTR_SLOT = "slot"
+ATTR_SLOT = "preset"
 ATTR_AUDIO_ONLY = "audio_only"
 ATTR_CONFIRM_OVERWRITE = "confirm_overwrite"
 
@@ -134,7 +134,7 @@ def _resolve_preset_slot(data: KramerData, token: str) -> int:
 
 def _check_audio_only(data: KramerData, audio_only: bool) -> None:
     if audio_only and not data.supports_modes:
-        raise ServiceValidationError(f"{data.model_name} has no separate audio setups")
+        raise ServiceValidationError(f"{data.model_name} has no separate audio presets")
 
 
 async def _run(coro: Any) -> None:
@@ -176,7 +176,7 @@ async def _handle_store_preset(hass: HomeAssistant, call: ServiceCall) -> None:
             raise HomeAssistantError(f"Kramer command failed: {err}") from err
         if occupied and not call.data[ATTR_CONFIRM_OVERWRITE]:
             raise ServiceValidationError(
-                f"Slot {slot} already holds a stored setup and storing would overwrite it. "
+                f"Preset {slot} already exists and storing would overwrite it. "
                 f"Set {ATTR_CONFIRM_OVERWRITE} to true if that is what you want."
             )
         await _run(data.client.async_store_preset(slot, audio_only))

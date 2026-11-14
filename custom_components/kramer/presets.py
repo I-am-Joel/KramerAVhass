@@ -45,13 +45,13 @@ def validate_description(text: str, slot: int, descriptions: Mapping[int, str]) 
 def resolve_slot(token: object, descriptions: Mapping[int, str], slots: int) -> int:
     """Turn a slot number or a description into a slot number, or raise ValueError."""
     if slots <= 0:
-        raise ValueError("This model has no stored setups")
+        raise ValueError("This model has no presets")
     text = str(token).strip()
     if text.isdigit():
         slot = int(text)
         if 1 <= slot <= slots:
             return slot
-        raise ValueError(f"Slot {slot} is out of range (1 to {slots})")
+        raise ValueError(f"Preset {slot} is out of range (1 to {slots})")
     folded = text.casefold()
     for slot, description in descriptions.items():
         if description.casefold() == folded:
@@ -60,7 +60,7 @@ def resolve_slot(token: object, descriptions: Mapping[int, str], slots: int) -> 
 
 
 def slot_label(slot: int, occupied: bool | None, description: str | None) -> str:
-    """Return the line shown for a slot in the slot picker."""
+    """Return the line shown for a slot in the preset picker."""
     state = "Occupied" if occupied else "Blank" if occupied is False else "Not checked"
     text = f"{slot:02d} - {state}"
     if description:

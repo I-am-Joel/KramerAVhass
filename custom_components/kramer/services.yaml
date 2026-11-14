@@ -20,7 +20,7 @@ store_preset:
     device:
       integration: kramer
   fields:
-    slot:
+    preset:
       required: true
       example: "12"
       selector:
@@ -41,7 +41,7 @@ recall_preset:
     device:
       integration: kramer
   fields:
-    slot:
+    preset:
       required: true
       example: "12"
       selector:

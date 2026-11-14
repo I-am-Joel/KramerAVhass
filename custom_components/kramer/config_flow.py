@@ -247,7 +247,7 @@ class KramerOptionsFlow(OptionsFlow):
         occupied = data.client.preset_defined.get(self._slot)
         state = "Occupied" if occupied else "Blank" if occupied is False else "Not checked"
         return {
-            "slot": f"{self._slot:02d}",
+            "preset": f"{self._slot:02d}",
             "state": state,
             "description": self._descriptions().get(self._slot, "(none)"),
             "contents": self._contents.get(self._slot, ""),
@@ -321,7 +321,7 @@ class KramerOptionsFlow(OptionsFlow):
         if data is None:
             return self.async_abort(reason="unit_unavailable")
         if user_input is not None:
-            self._slot = int(user_input["slot"])
+            self._slot = int(user_input["preset"])
             self._contents.pop(self._slot, None)
             return await self.async_step_slot()
 
@@ -336,7 +336,7 @@ class KramerOptionsFlow(OptionsFlow):
         ]
         schema = vol.Schema(
             {
-                vol.Required("slot", default=str(self._slot or 1)): SelectSelector(
+                vol.Required("preset", default=str(self._slot or 1)): SelectSelector(
                     SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN)
                 )
             }
@@ -399,9 +399,9 @@ class KramerOptionsFlow(OptionsFlow):
         if occupied:
             fields[vol.Required("confirm", default=False)] = BooleanSelector()
         placeholders["warning"] = (
-            f"**Slot {self._slot:02d} is occupied and storing will overwrite it.** {placeholders['contents']}"
+            f"**Preset {self._slot:02d} is occupied and storing will overwrite it.** {placeholders['contents']}"
             if occupied
-            else f"Slot {self._slot:02d} is blank, so nothing will be overwritten."
+            else f"Preset {self._slot:02d} is blank, so nothing will be overwritten."
         )
         return self.async_show_form(
             step_id="store", data_schema=vol.Schema(fields), errors=errors, description_placeholders=placeholders

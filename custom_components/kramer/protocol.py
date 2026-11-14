@@ -415,8 +415,13 @@ class KramerClient:
         instruction: int | tuple[int, ...],
         extra: Callable[[Packet], bool] | None = None,
         attempts: int = 2,
+        quiet: bool = False,
     ) -> Packet:
-        """Send a packet and wait for the unit's reply to it."""
+        """Send a packet and wait for the unit's reply to it.
+
+        A quiet request is a question the unit may legitimately not answer
+        (feature detection), so a failure is not recorded as an error.
+        """
         accepted = (instruction,) if isinstance(instruction, int) else instruction
 
         def matches(packet: Packet) -> bool:
@@ -452,10 +457,12 @@ class KramerClient:
                 if reply.instruction == INSTR_ERROR:
                     code = reply.output & 0x7F
                     message = f"Unit reported: {_ERROR_CODES.get(code, code)}"
-                    self._record_error(message)
+                    if not quiet:
+                        self._record_error(message)
                     raise KramerCommandError(message)
                 return reply
-        self._record_error("No reply from the unit")
+        if not quiet:
+            self._record_error("No reply from the unit")
         raise KramerTimeoutError("No reply from the unit")
 
     def _record_error(self, message: str) -> None:
@@ -605,6 +612,7 @@ class KramerClient:
                 reply = await self._request(
                     build_packet(INSTR_REQUEST_LOCK, 0, 0, self._machine),
                     INSTR_REQUEST_LOCK,
+                    quiet=not self.lock_supported,
                 )
             except (KramerCommandError, KramerTimeoutError):
                 if self.lock_supported:
@@ -631,28 +639,26 @@ class KramerClient:
 
     async def _identify(self, what: int, which: int) -> Packet:
         """Ask the identify instruction one question (see note 13 of the protocol document)."""
-        return await self._request(build_packet(INSTR_IDENTIFY, what, which, self._machine), INSTR_IDENTIFY)
+        return await self._request(build_packet(INSTR_IDENTIFY, what, which, self._machine), INSTR_IDENTIFY, quiet=True)
 
     async def _read_identity(self) -> None:
-        """Read the unit's name and software version once per connection, if it answers."""
+        """Read the unit's name and software versions once per connection, if it answers.
+
+        On the VS-162AV/RCA the prefix questions return the same letters as the
+        suffix question, so only the number and the first suffix are asked for.
+        """
         info: dict[str, object] = {}
         try:
             reply = await self._identify(1, 0)
             info["name_raw"] = [reply.input, reply.output]
             info["number"] = f"{reply.input:02d}{reply.output:02d}".lstrip("0")
-            for key, codes in (("prefix", (10, 11, 12)), ("suffix", (1, 2, 3))):
-                text = ""
-                for code in codes:
-                    reply = await self._identify(1, code)
-                    text += "".join(chr(b) for b in (reply.input, reply.output) if 32 < b < 127)
-                info[key] = text
+            reply = await self._identify(1, 1)
+            info["suffix"] = "".join(chr(b) for b in (reply.input, reply.output) if 32 < b < 127)
             reply = await self._identify(3, 0)
             info["firmware_raw"] = [reply.input, reply.output]
             info["firmware"] = f"{reply.input}.{reply.output}"
             reply = await self._identify(4, 0)
             info["audio_firmware"] = f"{reply.input}.{reply.output}"
-            reply = await self._identify(9, 0)
-            info["protocol_revision"] = f"{reply.input}.{reply.output}"
         except (KramerTimeoutError, KramerCommandError) as err:
             _LOGGER.debug("Unit did not answer every identity question: %s", err)
         self.identity = info
@@ -672,7 +678,7 @@ class KramerClient:
             for slot in range(1, self._preset_slots + 1):
                 found[slot] = await self.async_preset_defined(slot)
         except KramerError as err:
-            _LOGGER.debug("Preset scan stopped at slot %s: %s", len(found) + 1, err)
+            _LOGGER.debug("Preset scan stopped at preset %s: %s", len(found) + 1, err)
             return
         self._last_preset_scan = now
         self.preset_defined = found
@@ -688,9 +694,9 @@ class KramerClient:
 
     def _check_slot(self, slot: int) -> None:
         if self._preset_slots <= 0:
-            raise KramerCommandError("This model has no stored setups")
+            raise KramerCommandError("This model has no presets")
         if not 1 <= slot <= self._preset_slots:
-            raise KramerCommandError(f"Slot {slot} is out of range (1 to {self._preset_slots})")
+            raise KramerCommandError(f"Preset {slot} is out of range (1 to {self._preset_slots})")
 
     async def async_preset_defined(self, slot: int) -> bool:
         """Ask the unit whether a stored setup exists in a slot."""
@@ -739,7 +745,7 @@ class KramerClient:
     async def async_recall_preset(self, slot: int, audio_only: bool = False) -> None:
         """Recall a stored setup, then re-read everything the unit now holds."""
         if not await self.async_preset_defined(slot):
-            raise KramerCommandError(f"Slot {slot} is blank")
+            raise KramerCommandError(f"Preset {slot} is blank")
         instruction = INSTR_RECALL_AUDIO if audio_only else INSTR_RECALL_VIDEO
         # The unit acknowledges an audio recall with the video recall code.
         await self._request(

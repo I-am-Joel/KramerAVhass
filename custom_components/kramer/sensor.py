@@ -68,14 +68,13 @@ class KramerIdentitySensor(KramerEntity, SensorEntity):
     def native_value(self) -> str | None:
         """Return prefix, number and suffix as the unit sent them."""
         info = self._client.identity
-        parts = [str(info.get("prefix") or ""), str(info.get("number") or ""), str(info.get("suffix") or "")]
-        return "".join(parts) or None
+        return f"{info.get('number') or ''}{info.get('suffix') or ''}" or None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the pieces and the raw numbers (so a doubtful decode can be checked)."""
         info = self._client.identity
-        return {key: info.get(key) for key in ("prefix", "number", "suffix", "name_raw", "protocol_revision")}
+        return {key: info.get(key) for key in ("number", "suffix", "name_raw")}
 
 
 class KramerFirmwareSensor(KramerEntity, SensorEntity):
@@ -216,7 +215,7 @@ class KramerDisconnectedOutputsSensor(_RoutingBase):
 
 
 class KramerStoredPresetsSensor(KramerEntity, SensorEntity):
-    """How many preset slots are occupied on the unit, and which."""
+    """How many presets are stored on the unit, and which."""
 
     _attr_translation_key = "stored_presets"
 
@@ -240,8 +239,8 @@ class KramerStoredPresetsSensor(KramerEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the occupied slots with their HASS descriptions (held in Home Assistant, not on the unit)."""
         occupied = {
-            f"Slot {slot:02d}": self._data.preset_descriptions.get(slot, "(no HASS description)")
+            f"Preset {slot:02d}": self._data.preset_descriptions.get(slot, "(no HASS description)")
             for slot, filled in sorted(self._client.preset_defined.items())
             if filled
         }
-        return {"occupied_slots": occupied, "slots_on_unit": self._client.preset_slots}
+        return {"occupied_presets": occupied, "presets_on_unit": self._client.preset_slots}

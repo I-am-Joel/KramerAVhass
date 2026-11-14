@@ -178,6 +178,7 @@ More models can be added to `custom_components/kramer/models.py`.
 - **One unit per entry.** Add the integration once per switcher. Daisy-chained
   units on one connection are not tested or supported by this integration. This might be possible to add in the future.
   - **Presets.** It is not possible to delete a preset, once added. You *can* overwrite them.
+  - **Unannounced configuration changes** Some settings changed through a unit's on-screen menu - rather than via a dedicated panel button - are not announced by some models. An example I've discovered is that changing the front panel lock on the VS-162AV/RCA - via its menu driven control - is not announced, but changing the front panel lock on the VS-808YC - via its dedicated "panel lock" button - *is* announced. This integration refreshes all unit's states every 60 seconds, regardless, so an unannounced change will still appear in Home Assistant, but that could take up to 60 seconds. Changes made via this integration in Home Assistant are not affected by this limitation and the unit responds to such changes immediately. If this matters to you, the refresh interval can be shortened in the integration's options, at the cost of extra network traffic.
 
 ## Planned if possible
 

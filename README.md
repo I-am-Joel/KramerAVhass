@@ -8,8 +8,8 @@ the unit.
 This is a fork of [krohrbaugh/kramer-homeassistant][original] by Kevin
 Rohrbaugh, and it would not exist without his work. See [Credits](#credits).
 
-> **Status:** early release. I have tested published features on two units (a Kramer
-> VS-162AVRCA and a VS-812), respectively connected through Brainbox ES-257 and ES-256 serial-to-Ethernet
+> **Status:** early release. I have tested published features on three units (Kramer
+> VS-162AVRCA, VS-812 & VS-808YC), respectively connected through Brainbox ES-257 and ES-256 serial-to-Ethernet
 > bridges. Other models and bridges are expected to work but are untested.
 
 ## What you get
@@ -37,7 +37,7 @@ Switchers with an Ethernet port that use Protocol 2000 over TCP should
 also work, but I've not tested this. These instructions assume serial (RS-232) connection via an Ethernet <> serial bridge.
 
 ```
-Home Assistant ---- network ---- serial-to-Ethernet bridge ---- RS-232 ---- Kramer
+Home Assistant ---- network ---- ethernet-serial bridge ---- RS-232 ---- Kramer
 ```
 
 The integration:
@@ -62,12 +62,12 @@ port as this Kramer AV integration.
    server mode, and give it a unique, fixed IP address. Note the TCP port it listens on.
 3. Check the cable and any null-modem setting. On the VS-162AV, for instance, a DIP switch on the rear defines whether a null-modem adapter is
    required or a straight-through cable will work. On other models this cannot be defined and you must either use a null-modem cable or a null-modem adaptor with a straight-through cable. If the unit stays silent, this is the first thing to check.
-4. Check the unit's **machine number**. A single unit is normally number 1. Daisy-chained units will each have a different number (see limitations, below).
+4. Check and set the unit's **machine number**. A single unit is normally number 1. This is usually defined using dip switches. Daisy-chained units will each require a different number (see limitations, below).
 5. If HASS or a computer on your network cannot see your bridge, try keeping HASS/your computer and the bridge on a network path that does not block or
    isolate the devices from one other. This might be a software configuration on your router or something else. During testing I found TP-Link routers blocked the Brainbox bridges, even though they could be found with a direct network connection from another device. Using a network path that didn't rely on those routers (such as unmanaged network switches) resolved this.
 6. This integration is designed to keep its connection with an ethernet>serial bridge open at all times. If you need to change a bridge's settings, disable the integration entry in HASS first, as this will ensure there's no conflict with the integration.
 
-## Installation (choose HACS or manual then proceed to setup)
+## Installation (choose either the HACS or manual method, then proceed to the setup stage)
 
 ### HACS (custom repository)
 
@@ -98,9 +98,9 @@ Copy the `custom_components/kramer` folder from this repository into the
 - **Configure** (on the integration):
   Rename inputs and outputs, one name
   per line. Leave a line blank to keep the default. The names "Off" and "Mixed"
-  are reserved and input names must all be different.
+  are reserved and all names must be unique.
 
-  Set up, store and recall presets (for models that support this). It is not possible to delete a preset's configuration via the integration, but you can clear its name to indicate a preset number is free to be overwritten in the future and you can store a new configuration over the top of an existing preset.
+  Set up, store and recall presets (for models that support this). Support varies between models. You can store and recall presets but cannot delete a preset's configuration. Instead you can clear its name to indicate a preset number is free to be overwritten and you can store a new configuration over the top of an existing preset. The integration identifies and displays preset slots that are occupied or empty.
 
 ## Actions
 
@@ -153,18 +153,18 @@ Recalls a stored setup. A full recall also sets the mode that was stored with it
 
 ### Notes
 
-- Anyone who can call actions in Home Assistant can use these. Only the Configure dialogue is limited to administrators.
 - Descriptions are only held in Home Assistant, set under Configure → Presets. They are not stored on the unit.
 - Preset numbers match those called via the unit's front panel (eg VS-162AV/RCA: 1 to 60).
 
 
 
-## Tested models
+## Tested models and features
 
 | Model | Notes |
 | -- | -- |
-| VS-162AV / VS-162AVRCA | 16 x 16 matrix switching, audio-follow-video and breakaway, presets. Tested on the RCA version. |
+| VS-162AV / VS-162AVRCA | 16 x 16 matrix switching, audio-follow-video and breakaway, presets, panel lock (see limitations). Tested on the RCA version. |
 | VS-812 | 8 x 1 input switching. |
+| VS-808YC | 8 x 8 matrix switching, AFV, breakaway, presets, panel lock |
 
 More models can be added to `custom_components/kramer/models.py`.
 
@@ -176,16 +176,20 @@ More models can be added to `custom_components/kramer/models.py`.
   mode, route commands from Home Assistant change **video only** and audio continues to follow whatever it was last set to. Changing audio separately is not
   yet supported, but I hope to add this later.
 - **One unit per entry.** Add the integration once per switcher. Daisy-chained
-  units on one connection are not tested or supported by this integration. This might be possible to add in the future.
+  units on one connection are not tested or supported by this integration. It might work, I don't know.
   - **Presets.** It is not possible to delete a preset, once added. You *can* overwrite them.
-  - **Unannounced configuration changes** Some settings changed through a unit's on-screen menu - rather than via a dedicated panel button - are not announced by some models. An example I've discovered is that changing the front panel lock on the VS-162AV/RCA - via its menu driven control - is not announced, but changing the front panel lock on the VS-808YC - via its dedicated "panel lock" button - *is* announced. This integration refreshes all unit's states every 60 seconds, regardless, so an unannounced change will still appear in Home Assistant, but that could take up to 60 seconds. Changes made via this integration in Home Assistant are not affected by this limitation and the unit responds to such changes immediately. If this matters to you, the refresh interval can be shortened in the integration's options, at the cost of extra network traffic.
+  - **Unannounced configuration changes** Some settings changed through a unit's on-screen menu - rather than via a dedicated panel button - are not announced by some models. An example I've discovered is that changing the front panel lock on the VS-162AV/RCA - via its menu driven control - is not announced, but changing the front panel lock on the VS-808YC - via its dedicated "panel lock" button - *is* announced. This integration refreshes all unit's states every 60 seconds, regardless, so an unannounced change will still appear in Home Assistant, but that could take up to 60 seconds. Changes made via the integration in Home Assistant are not affected by this limitation and the unit responds to such changes immediately. If this matters to you, the refresh interval can be shortened in the integration's options, at the cost of extra network traffic.
 
 ## Planned if possible
 
 - "Set route" action option for HASS automations (hopefully soon).
 - Separate video and audio routing options in Breakaway mode (hopefully soon).
 - Additional protocol variant to enable control of Kramer presentation scalers (hopefully soon).
+- A dedicated matrix sensor that defines the state of the unit in a single entity (hopefully soon).
+- A dedicated matrix dashboard card that mimics the layout and function of the physical unit (hopefully soon).
 - Supporting multiple daisy-chained units on a single connection (may not be worthwhile and/or possible).
+- More flexible ways to configure unknown models for use in the integration (hopefully soon).
+- Compatibility with Kramer Presentation Scalers - these use a different protocol that'll need adding (hopefully soon).
 - A model-definition wizard so users can contribute model profiles to the project through GitHub (for the future).
 - More models predefined, if I can access and test them.
 
@@ -215,7 +219,7 @@ Assistant restarts. The log shows each connected unit's four-byte messages in he
 This project is a fork of **[kramer-homeassistant][original] by Kevin Rohrbaugh
 ([@krohrbaugh][author])**, released under the MIT licence. Kevin wrote the
 original integration, including the Home Assistant setup, the release and
-checking workflows and the HACS packaging that this fork still uses, and
+checking workflows and the HACS packaging that this fork still uses. He
 kindly agreed to this fork being developed.
 
 This fork replaces the way the integration talks to the switcher with a new

@@ -46,7 +46,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Kramer options",
+        "title": "{name} configuration",
         "menu_options": {
           "names": "Input and output names",
           "presets": "Presets"
@@ -55,12 +55,10 @@
       },
       "names": {
         "title": "Input and output names",
-        "description": "One name per line, in order. Leave a line blank to use the default. Units with separate video and audio have a name list for each. An output's name gets \"Video\" or \"Audio\" added in Home Assistant. A blank audio output name uses the output's own name.",
+        "description": "One name per line, in order. Leave a line blank to use the default.",
         "data": {
-          "input_names": "Video input names (or input names)",
-          "audio_input_names": "Audio input names",
-          "output_names": "Output names",
-          "audio_output_names": "Audio output names"
+          "input_names": "Input names",
+          "output_names": "Output names"
         }
       },
       "presets": {
@@ -109,6 +107,16 @@
         "description": "Forget in HASS – presets on the unit can be overwritten but cannot be deleted.\n\nThis removes only the HASS description (\"{description}\") for preset {preset}. The preset on the unit is not changed and it will still be **{state}**.",
         "data": {
           "confirm": "Yes, forget the HASS description"
+        }
+      },
+      "names_av": {
+        "title": "Input and output names",
+        "description": "One name per line, in order. Leave a line blank to use the default. Each input and output has a video name and an audio name.",
+        "data": {
+          "input_names": "Video input names",
+          "audio_input_names": "Audio input names",
+          "output_names": "Video output names",
+          "audio_output_names": "Audio output names"
         }
       }
     },
@@ -177,8 +185,8 @@
       "firmware": {
         "name": "Firmware version"
       },
-      "matrix": {
-        "name": "Matrix"
+      "status": {
+        "name": "Status"
       }
     },
     "number": {

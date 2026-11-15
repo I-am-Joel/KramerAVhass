@@ -13,7 +13,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, SOURCE_OFF
-from .entity import KramerConfigEntry, KramerData
+from .entity import KramerConfigEntry, KramerData, base_output_name
 from .presets import resolve_slot
 from .protocol import MODE_AFV, MODE_BREAKAWAY, KramerError
 
@@ -123,7 +123,10 @@ def _resolve_outputs(data: KramerData, tokens: list[str]) -> list[int]:
                 raise ServiceValidationError(f"Output {number} does not exist (1 to {len(data.output_names)})")
         else:
             for index, name in enumerate(data.output_names, start=1):
-                if name.casefold() == text.casefold():
+                names = {name, base_output_name(name)}
+                if index <= len(data.audio_output_names):
+                    names.add(data.audio_output_names[index - 1])
+                if text.casefold() in {n.casefold() for n in names}:
                     number = index
                     break
         if number is None:

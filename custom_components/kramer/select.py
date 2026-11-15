@@ -14,6 +14,7 @@ from .entity import (
     audio_input_to_name,
     audio_name_to_input,
     audio_source_options,
+    base_output_name,
     input_to_name,
     link_icon,
     name_to_input,
@@ -40,7 +41,11 @@ async def async_setup_entry(
     for number, name in enumerate(data.output_names, start=1):
         entities.append(KramerOutputSelect(entry, number, name))
         if data.has_audio:
-            audio_name = data.audio_output_names[number - 1] if number <= len(data.audio_output_names) else name
+            audio_name = (
+                data.audio_output_names[number - 1]
+                if number <= len(data.audio_output_names)
+                else f"{base_output_name(name)} Audio"
+            )
             entities.append(KramerAudioOutputSelect(entry, number, audio_name))
     if data.supports_modes:
         entities.append(KramerModeSelect(entry))
@@ -113,7 +118,7 @@ class KramerOutputSelect(_OutputLayerSelect):
     def __init__(self, entry: KramerConfigEntry, output: int, name: str) -> None:
         """Initialise."""
         data = entry.runtime_data
-        super().__init__(entry, f"output_{output}", output, f"{name} Video" if data.has_audio else name)
+        super().__init__(entry, f"output_{output}", output, name if data.has_audio else base_output_name(name))
         self._attr_options = source_options(self._data)
 
     @property
@@ -131,7 +136,7 @@ class KramerAudioOutputSelect(_OutputLayerSelect):
 
     def __init__(self, entry: KramerConfigEntry, output: int, name: str) -> None:
         """Initialise."""
-        super().__init__(entry, f"audio_output_{output}", output, f"{name} Audio")
+        super().__init__(entry, f"audio_output_{output}", output, name)
         self._attr_options = audio_source_options(self._data)
 
     @property

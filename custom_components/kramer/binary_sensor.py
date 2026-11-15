@@ -7,7 +7,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import KramerConfigEntry, KramerEntity, audio_input_to_name, input_to_name, link_icon
+from .entity import KramerConfigEntry, KramerEntity, audio_input_to_name, base_output_name, input_to_name, link_icon
 from .protocol import MODE_AFV
 
 
@@ -51,7 +51,7 @@ class KramerInStepSensor(KramerEntity, BinarySensorEntity):
         """Initialise."""
         super().__init__(entry, f"in_step_{output}")
         self._output = output
-        self._attr_name = f"{name} In step"
+        self._attr_name = f"{base_output_name(name)} In step"
 
     @property
     def available(self) -> bool:

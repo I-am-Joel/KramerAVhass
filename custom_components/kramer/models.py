@@ -39,12 +39,11 @@ MODELS: dict[str, KramerModel] = {
         True,
         preset_slots=60,
         notes=(
-            "Front panel lock: on this unit the lock is a menu setting, and the unit does not announce "
-            "changes made in the menu. Home Assistant notices them at the next refresh (60 seconds by "
-            "default). If that is too slow, turn on Custom refresh in the device's Controls and shorten "
-            "the interval; this adds network traffic. Changes made from Home Assistant, route and mode "
-            "changes and stores made on the front panel show straight away. Presets can be overwritten "
-            "but the unit refuses to delete them."
+            "**Model-specific limits:**\n\n"
+            "- Front panel lock state is not announced by this model. The integration reads missed "
+            'announcements on a refresh cycle (60 seconds by default). "Custom refresh" in the device\'s '
+            "Controls will shorten that interval at the cost of increased network traffic.\n"
+            "- Presets can be overwritten but the unit refuses to delete them."
         ),
     ),
     "vs-808yc": KramerModel(
@@ -54,11 +53,6 @@ MODELS: dict[str, KramerModel] = {
         8,
         True,
         preset_slots=16,
-        notes=(
-            "The front panel lock button, route and mode changes, and stores and recalls made on the front "
-            "panel show straight away. The unit does not reply when a blank preset is recalled, so the "
-            "integration only recalls presets known to be stored."
-        ),
     ),
     "vs-812": KramerModel("vs-812", "VS-812", 8, 1, False, supports_off=False, supports_lock=False),
 }

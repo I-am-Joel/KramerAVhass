@@ -75,9 +75,9 @@ def default_input_names(count: int, suffix: str = "") -> list[str]:
     return [f"Input {i:03d}{suffix}" for i in range(1, count + 1)]
 
 
-def default_output_names(count: int) -> list[str]:
-    """Return Output 001, Output 002 ..."""
-    return [f"Output {i:03d}" for i in range(1, count + 1)]
+def default_output_names(count: int, suffix: str = "") -> list[str]:
+    """Return Output 001, Output 002 ... with an optional suffix such as " Video"."""
+    return [f"Output {i:03d}{suffix}" for i in range(1, count + 1)]
 
 
 def effective_names(
@@ -102,8 +102,8 @@ def legacy_input_names(count: int) -> list[set[str]]:
 
 
 def legacy_output_names(count: int) -> list[set[str]]:
-    """Return the earlier default name for each output: Output 01."""
-    return [{f"Output {i:02d}"} for i in range(1, count + 1)]
+    """Return the earlier default names for each output: Output 01, then Output 001."""
+    return [{f"Output {i:02d}", f"Output {i:03d}"} for i in range(1, count + 1)]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -138,7 +138,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         refresh_interval=effective_refresh(custom_refresh, refresh_seconds),
     )
     output_names = effective_names(
-        entry.options.get(CONF_OUTPUT_NAMES), default_output_names(outputs), legacy_output_names(outputs)
+        entry.options.get(CONF_OUTPUT_NAMES),
+        default_output_names(outputs, " Video" if breakaway else ""),
+        legacy_output_names(outputs),
     )
     entry.runtime_data = KramerData(
         client=client,
@@ -155,7 +157,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         ),
         output_names=output_names,
         audio_output_names=(
-            effective_names(entry.options.get(CONF_AUDIO_OUTPUT_NAMES), output_names) if breakaway else []
+            effective_names(
+                entry.options.get(CONF_AUDIO_OUTPUT_NAMES),
+                default_output_names(outputs, " Audio"),
+                legacy_output_names(outputs),
+            )
+            if breakaway
+            else []
         ),
         supports_modes=bool(data.get(CONF_MODES, True)),
         supports_off=resolve_supports_off(data),

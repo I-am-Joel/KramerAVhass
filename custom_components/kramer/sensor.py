@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import SOURCE_MIXED
-from .entity import KramerConfigEntry, KramerEntity, audio_input_to_name, input_to_name
+from .entity import KramerConfigEntry, KramerEntity, audio_input_to_name, base_output_name, input_to_name
 from .protocol import MODE_AFV, MODE_BREAKAWAY
 
 
@@ -22,7 +22,7 @@ async def async_setup_entry(
     data = entry.runtime_data
     client = data.client
     entities: list[KramerEntity] = [
-        KramerMatrixSensor(entry),
+        KramerStatusSensor(entry),
         KramerLastReplySensor(entry),
         KramerLastErrorSensor(entry),
     ]
@@ -185,11 +185,11 @@ class KramerRoutingSensor(_RoutingBase):
         client = self._client
         if not self._data.has_audio or not client.audio_routes:
             return {
-                name: input_to_name(self._data, client.routes.get(index))
+                base_output_name(name): input_to_name(self._data, client.routes.get(index))
                 for index, name in enumerate(self._data.output_names, start=1)
             }
         return {
-            name: (
+            base_output_name(name): (
                 f"Video: {input_to_name(self._data, client.routes.get(index))}; "
                 f"Audio: {audio_input_to_name(self._data, client.audio_routes.get(index))}"
             )
@@ -260,10 +260,10 @@ class KramerStoredPresetsSensor(KramerEntity, SensorEntity):
         return {"occupied_presets": occupied, "presets_on_unit": self._client.preset_slots}
 
 
-MATRIX_SCHEMA_VERSION = 1
+STATUS_SCHEMA_VERSION = 1
 
 
-class KramerMatrixSensor(KramerEntity, SensorEntity):
+class KramerStatusSensor(KramerEntity, SensorEntity):
     """Everything about the unit in one place, for dashboard cards and automations.
 
     Contract (schema_version 1): attributes are only ever added, never renamed,
@@ -271,13 +271,13 @@ class KramerMatrixSensor(KramerEntity, SensorEntity):
     Attributes are not recorded in history, so route changes do not grow the database.
     """
 
-    _attr_translation_key = "matrix"
+    _attr_translation_key = "status"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _unrecorded_attributes = frozenset({MATCH_ALL})
 
     def __init__(self, entry: KramerConfigEntry) -> None:
         """Initialise."""
-        super().__init__(entry, "matrix")
+        super().__init__(entry, "status")
         self._title = entry.title
         self._timer: Any = None
 
@@ -316,7 +316,7 @@ class KramerMatrixSensor(KramerEntity, SensorEntity):
         has_audio = data.has_audio
         occupied = sorted(slot for slot, filled in client.preset_defined.items() if filled)
         return {
-            "schema_version": MATRIX_SCHEMA_VERSION,
+            "schema_version": STATUS_SCHEMA_VERSION,
             "name": self._title,
             "model": data.model_name,
             "inputs": client.inputs,

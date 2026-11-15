@@ -92,8 +92,8 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         """Values to pre-fill: the entry being reconfigured, else defaults."""
         if self.source == "reconfigure":
             entry = self._get_reconfigure_entry()
-            return {CONF_NAME: entry.title, **entry.data}
-        return {}
+            return {CONF_NAME: entry.title, **entry.data, **self._data}
+        return dict(self._data)
 
     async def _finish(self, errors: dict[str, str]) -> ConfigFlowResult | None:
         """Test the connection and save. Returns None if there were errors."""
@@ -131,6 +131,7 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         cur = self._current()
         if user_input is not None:
+            previous = self._data
             self._data = {
                 CONF_NAME: user_input[CONF_NAME].strip(),
                 CONF_HOST: user_input[CONF_HOST].strip(),
@@ -139,6 +140,10 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             }
             model = user_input[CONF_MODEL]
             if model == OTHER:
+                if previous.get(CONF_MODEL) == OTHER:  # back from a failed test: keep the second screen's values
+                    for key in (CONF_MODEL_NAME, CONF_INPUTS, CONF_OUTPUTS, CONF_MODES, CONF_PRESET_SLOTS):
+                        if key in previous:
+                            self._data[key] = previous[key]
                 return await self.async_step_other()
             m = MODELS[model]
             self._data.update(
@@ -155,6 +160,10 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:  # an error: keep what was typed
             cur = {**cur, **user_input}
+        return self._user_form(cur, errors)
+
+    def _user_form(self, cur: dict[str, Any], errors: dict[str, str]) -> ConfigFlowResult:
+        """Show the first screen with these values filled in."""
         schema = vol.Schema(
             {
                 vol.Required(CONF_NAME, default=cur.get(CONF_NAME, "Kramer Matrix")): TextSelector(),
@@ -192,6 +201,9 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             if (result := await self._finish(errors)) is not None:
                 return result
+            # The connection details are on the first screen, so go back there with
+            # the error and everything typed so far (on both screens) kept.
+            return self._user_form(self._current(), errors)
 
         if user_input is not None:  # an error: keep what was typed
             cur = {**cur, **user_input}
@@ -283,7 +295,7 @@ class KramerOptionsFlow(OptionsFlow):
             return self.async_show_menu(
                 step_id="init",
                 menu_options=["names", "presets"] if has_presets else ["names"],
-                description_placeholders={"notes": notes or " "},
+                description_placeholders={"notes": notes or " ", "name": self.config_entry.title},
             )
         return await self.async_step_names()
 
@@ -294,7 +306,8 @@ class KramerOptionsFlow(OptionsFlow):
         breakaway = bool(entry.data.get(CONF_MODES, True))
         in_defaults = default_input_names(inputs, " Video" if breakaway else "")
         audio_defaults = default_input_names(inputs, " Audio")
-        out_defaults = default_output_names(outputs)
+        out_defaults = default_output_names(outputs, " Video" if breakaway else "")
+        audio_out_defaults = default_output_names(outputs, " Audio")
         errors: dict[str, str] = {}
 
         def check_inputs(key: str, names: list[str], error: str | None) -> None:
@@ -319,8 +332,7 @@ class KramerOptionsFlow(OptionsFlow):
             elif len({n.casefold() for n in out_names}) != len(out_names):
                 errors[CONF_OUTPUT_NAMES] = "duplicate_names"
             elif breakaway:
-                # A blank audio output name uses the output's own name.
-                audio_out_names, err_ao = _parse_names(user_input[CONF_AUDIO_OUTPUT_NAMES], out_names)
+                audio_out_names, err_ao = _parse_names(user_input[CONF_AUDIO_OUTPUT_NAMES], audio_out_defaults)
                 if err_ao:
                     errors[CONF_AUDIO_OUTPUT_NAMES] = err_ao
                 elif len({n.casefold() for n in audio_out_names}) != len(audio_out_names):
@@ -336,7 +348,7 @@ class KramerOptionsFlow(OptionsFlow):
                         n if n != d else "" for n, d in zip(audio_names, audio_defaults, strict=True)
                     ]
                     saved[CONF_AUDIO_OUTPUT_NAMES] = [
-                        n if n != d else "" for n, d in zip(audio_out_names, out_names, strict=True)
+                        n if n != d else "" for n, d in zip(audio_out_names, audio_out_defaults, strict=True)
                     ]
                 return self.async_create_entry(data=saved)
 
@@ -354,13 +366,21 @@ class KramerOptionsFlow(OptionsFlow):
             ] = multiline
         fields[vol.Required(CONF_OUTPUT_NAMES, default=typed.get(CONF_OUTPUT_NAMES, "\n".join(saved_out)))] = multiline
         if breakaway:
-            saved_audio_out = effective_names(entry.options.get(CONF_AUDIO_OUTPUT_NAMES), saved_out)
+            saved_audio_out = effective_names(
+                entry.options.get(CONF_AUDIO_OUTPUT_NAMES), audio_out_defaults, legacy_output_names(outputs)
+            )
             fields[
                 vol.Required(
                     CONF_AUDIO_OUTPUT_NAMES, default=typed.get(CONF_AUDIO_OUTPUT_NAMES, "\n".join(saved_audio_out))
                 )
             ] = multiline
-        return self.async_show_form(step_id="names", data_schema=vol.Schema(fields), errors=errors)
+        # Units with separate audio get a form with "Video output names" and "Audio output names".
+        step = "names_av" if breakaway else "names"
+        return self.async_show_form(step_id=step, data_schema=vol.Schema(fields), errors=errors)
+
+    async def async_step_names_av(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Show the names step for units with separate audio (this form has its own wording)."""
+        return await self.async_step_names(user_input)
 
     async def async_step_presets(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Choose a slot (every slot is listed, with whether it is occupied on the unit)."""

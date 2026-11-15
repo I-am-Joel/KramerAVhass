@@ -101,6 +101,11 @@ def reject_mixed() -> None:
     raise ServiceValidationError("Mixed is only a status. Choose an input or Off instead.")
 
 
+def base_output_name(name: str) -> str:
+    """Return an output's name without a trailing " Video", for things that cover both layers."""
+    return name.removesuffix(" Video")
+
+
 def input_to_name(data: KramerData, number: int | None) -> str | None:
     """Convert an input number to its name (0 = Off)."""
     if number is None:

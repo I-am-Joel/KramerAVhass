@@ -9,7 +9,7 @@ This is a fork of [krohrbaugh/kramer-homeassistant][original] by Kevin
 Rohrbaugh, and it would not exist without his work. See [Credits](#credits).
 
 > **Status:** early release. I have tested published features on three units (Kramer
-> VS-162AVRCA, VS-812 & VS-808YC), respectively connected through Brainbox ES-247 and ES-246 serial-to-Ethernet
+> VS-162AVRCA, VS-812 & VS-808YC), respectively connected through Brainboxes ES-247 and ES-246 serial-to-Ethernet
 > bridges. Other models and bridges are expected to work but are untested.
 
 ## What you get
@@ -64,7 +64,7 @@ port as this Kramer AV integration.
    required or a straight-through cable will work. On other models this cannot be defined and you must either use a null-modem cable or a null-modem adaptor with a straight-through cable. If the unit stays silent, this is the first thing to check.
 4. Check and set the unit's **machine number**. A single unit is normally number 1. This is usually defined using dip switches. Daisy-chained units will each require a different number (see limitations, below).
 5. If HASS or a computer on your network cannot see your bridge, try keeping HASS/your computer and the bridge on a network path that does not block or
-   isolate the devices from one another. This might be a software configuration on your router or something else. During testing I found TP-Link routers blocked the Brainbox bridges, even though they could be found with a direct network connection from another device. Using a network path that didn't rely on those routers (such as unmanaged network switches) resolved this.
+   isolate the devices from one another. This might be a software configuration on your router or something else. During testing I found TP-Link routers blocked the Brainboxes bridges, even though they could be found with a direct network connection from another device. Using a network path that didn't rely on those routers (such as unmanaged network switches) resolved this.
 6. This integration is designed to keep its connection with an ethernet>serial bridge open at all times. If you need to change a bridge's settings, disable the integration entry in HASS first, as this will ensure there's no conflict with the integration.
 
 ## Installation (choose either the HACS or manual method, then proceed to the setup stage)
@@ -202,7 +202,7 @@ Assistant restarts. The log shows each connected unit's four-byte messages in he
 | "Could not connect" during setup | Wrong IP or port, or the bridge is not in raw TCP server mode. |
 | "Connected, but the switcher did not answer" | Serial settings, cable or null-modem setting or adaptor, or wrong machine number. Check configuration options in the product manual and that dip switches on the unit match your required configuration. On some models the up/down and switch numbers aren't clear. EG VS-812 has switches on the underside with 1 to 4 running from right to left of the unit, as viewed from the front and with "on" being towards the back panel<img width="1200" height="800" alt="Kramer vs-812 underside" src="https://github.com/user-attachments/assets/1a19251d-acca-45bc-bcf6-f86c340d9d69" />Image shows underside of Kramer VS-812 with switch 1 in the "on" position. |
 | Entities unavailable | Bridge or switcher is off, or the network is down or disconnected. The integration should recover by itself after the underlying issue is resolved. |
-| Connection resets when two or more applications are communicating with the bridge | In testing with a Brainbox ES-246, reliable operation was confirmed with one application (eg this integration) using the bridge's port and became unreliable with two (eg this integration and ssh). Different bridges or firmware versions may support this better. |
+| Connection resets when two or more applications are communicating with the bridge | In testing with a Brainboxes ES-246, reliable operation was confirmed with one application (eg this integration) using the bridge's port and became unreliable with two (eg this integration and ssh). Different bridges or firmware versions may support this better. |
 | Serial link not working | It's worth testing the link between your HASS host and the unit, bypassing the integration, to narrow down the cause. Disable the Kramer entry for that unit, then run the command: `(printf '\x05\x80\x81\x81'; sleep 3) \| nc -w 5 IPADDRESS PORT \| od -An -tx1` from a terminal in Home Assistant (replace IPADDRESS and PORT). A working link prints one line of four numbers starting 45. No output means the bridge is reachable but the unit isn't answering: check the serial cable (a null-modem adapter is needed on some models), the bridge's serial settings (9600, 8 data bits, no parity, 1 stop bit, no flow control) and the machine number dip switches on the unit. If it outputs an error such as "Connection refused" or "timed out", instead of numbers, Home Assistant can't reach the bridge at all. In which case, check the bridge is powered and on the network, its IP address and port are correctly configured, that it is set to Raw TCP, and that nothing else is connected to it. Don't forget to re-enable the integration entry, when you're done. |
 
 ## Credits

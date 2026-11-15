@@ -9,7 +9,7 @@ This is a fork of [krohrbaugh/kramer-homeassistant][original] by Kevin
 Rohrbaugh, and it would not exist without his work. See [Credits](#credits).
 
 > **Status:** early release. I have tested published features on three units (Kramer
-> VS-162AVRCA, VS-812 & VS-808YC), respectively connected through Brainbox ES-257 and ES-256 serial-to-Ethernet
+> VS-162AVRCA, VS-812 & VS-808YC), respectively connected through Brainbox ES-247 and ES-246 serial-to-Ethernet
 > bridges. Other models and bridges are expected to work but are untested.
 
 ## What you get
@@ -20,13 +20,13 @@ Depending on the features your switcher supports, the integration creates one de
 | -- | -- | -- |
 | Device name (for example "Studio 1 - VS-812") | `media_player` | Choose one input for **all** outputs. Shows **Mixed** when the outputs are not all set to the same input, and **Off** when all are disconnected. |
 | All outputs | `select` | The same as the media player, exposed as a simple input list drop-down that sends to all outputs at once. |
-| Output 01, Output 02 ... | `select` | One per output. Choose which input feeds that output, or **Off** to turn the output off. |
-| Mode | `select` | **Audio follow video** or **Breakaway** (see [Limitations](#limitations)). |
+| Output 001 Video, Output 002 Video ... | `select` | One per audio and one per video output. Choose which input feeds that output, or **Off** to turn the output off. |
+| Mode | `select` | **Audio follow video** or **Breakaway**. |
 | Front panel lock | `switch` | Locks or unlocks the buttons on the unit. |
 | Read only sensors | Numerous sensors are exposed. Depending on what can be read from the unit, these can include firmware version, routing summary, total number of stored presets and connection status |
 
 All of these update in HASS and on the device front panel, where available. Default naming of inputs and outputs are
-"Input 001", "Input 002" etc and "Output 001", "Output 002" etc, until you rename them.
+"Input 001 Audio", "Input 002 Video" etc and "Output 001 Audio", "Output 002 Video" etc, until you rename them.
 
 ## How it connects
 
@@ -44,7 +44,7 @@ The integration:
 
 - keeps a connection open for each device and reconnects by itself if the bridge or the
   switcher loses power or the network drops (tested);
-- asks the switcher for its full state when it connects, acts on messages the unit sends as it changes and re-reads full state once a minute;
+- asks the switcher for its full state when it connects, acts on messages the unit sends as it changes and re-reads full state, defaulted to once per minute;
 - marks entities as unavailable when it cannot reach the unit, automatically restoring them when it can.
 
 **Only one program should be connected to the bridge's TCP port at a time.**
@@ -96,7 +96,7 @@ Copy the `custom_components/kramer` folder from this repository into the
 
 - **Reconfigure** (three-dot menu on the integration): change available options relevant to your device, including name, address, port, machine number, model and number of supported presets.
 - **Configure** (on the integration):
-  Rename inputs and outputs, one name
+  Rename audio and video inputs and audio and video outputs, one name
   per line. Leave a line blank to keep the default. The names "Off" and "Mixed"
   are reserved and all names must be unique.
 
@@ -162,34 +162,25 @@ Recalls a stored setup. A full recall also sets the mode that was stored with it
 
 | Model | Notes |
 | -- | -- |
-| VS-162AV / VS-162AVRCA | 16 x 16 matrix switching, audio-follow-video and breakaway, presets, panel lock (see limitations). Tested on the RCA version. |
+| VS-162AV / VS-162AVRCA | 16 x 16 matrix switching, audio-follow-video and breakaway, 60 presets, panel lock (see limitations). Tested on the RCA version. |
 | VS-812 | 8 x 1 input switching. |
-| VS-808YC | 8 x 8 matrix switching, AFV, breakaway, presets, panel lock |
+| VS-808YC | 8 x 8 matrix switching, AFV, breakaway, 16 presets, panel lock |
 
 More models can be added to `custom_components/kramer/models.py`.
 
 ## Limitations (not all features apply to all models)
 
-- **Mode.** In testing, my unit only reported whether it is in audio-follow-video or
-  breakaway mode. I could not get it to report whether VIDEO or AUDIO is selected on the
-  front panel and I was unable to get my test unit to select AUDIO. Therefore, in Breakaway
-  mode, route commands from Home Assistant change **video only** and audio continues to follow whatever it was last set to. Changing audio separately is not
-  yet supported, but I hope to add this later.
 - **One unit per entry.** Add the integration once per switcher. Daisy-chained
   units on one connection are not tested or supported by this integration. It might work, I don't know.
-  - **Presets.** It is not possible to delete a preset, once added. You *can* overwrite them.
-  - **Unannounced configuration changes** Some settings changed through a unit's on-screen menu - rather than via a dedicated panel button - are not announced by some models. An example I've discovered is that changing the front panel lock on the VS-162AV/RCA - via its menu driven control - is not announced, but changing the front panel lock on the VS-808YC - via its dedicated "panel lock" button - *is* announced. This integration refreshes all unit's states every 60 seconds, regardless, so an unannounced change will still appear in Home Assistant, but that could take up to 60 seconds. Changes made via the integration in Home Assistant are not affected by this limitation and the unit responds to such changes immediately. If this matters to you, the refresh interval can be shortened in the integration's options, at the cost of extra network traffic.
+- **Presets.** It is not possible to delete a preset, once added. You *can* overwrite them.
+- **Unannounced configuration changes** Some settings changed through a unit's on-screen menu - rather than via a dedicated panel button - are not announced by some models. An example I've discovered is that changing the front panel lock on the VS-162AV/RCA - via its menu driven control - is not announced, but changing the front panel lock on the VS-808YC - via its dedicated "panel lock" button - *is* announced. This integration refreshes all unit's states every 60 seconds, regardless, so an unannounced change will still appear in Home Assistant, but that could take up to 60 seconds. Changes made via the integration in Home Assistant are not affected by this limitation and the unit responds to such changes immediately. If this matters to you, the refresh interval can be adjusted in the device's options, at the cost of extra network traffic.
 
 ## Planned if possible
 
-- "Set route" action option for HASS automations (hopefully soon).
-- Separate video and audio routing options in Breakaway mode (hopefully soon).
 - Additional protocol variant to enable control of Kramer presentation scalers (hopefully soon).
-- A dedicated matrix sensor that defines the state of the unit in a single entity (hopefully soon).
 - A dedicated matrix dashboard card that mimics the layout and function of the physical unit (hopefully soon).
 - Supporting multiple daisy-chained units on a single connection (may not be worthwhile and/or possible).
 - More flexible ways to configure unknown models for use in the integration (hopefully soon).
-- Compatibility with Kramer Presentation Scalers - these use a different protocol that'll need adding (hopefully soon).
 - A model-definition wizard so users can contribute model profiles to the project through GitHub (for the future).
 - More models predefined, if I can access and test them.
 

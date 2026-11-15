@@ -27,11 +27,39 @@ class KramerModel:
     supports_off: bool = True
     supports_lock: bool = True
     preset_slots: int = 0
+    notes: str = ""
 
 
 MODELS: dict[str, KramerModel] = {
-    "vs-162av-rca": KramerModel("vs-162av-rca", "VS-162AV/RCA", 16, 16, True, preset_slots=60),
-    "vs-808yc": KramerModel("vs-808yc", "VS-808YC", 8, 8, True, preset_slots=16),
+    "vs-162av-rca": KramerModel(
+        "vs-162av-rca",
+        "VS-162AV/RCA",
+        16,
+        16,
+        True,
+        preset_slots=60,
+        notes=(
+            "Front panel lock: on this unit the lock is a menu setting, and the unit does not announce "
+            "changes made in the menu. Home Assistant notices them at the next refresh (60 seconds by "
+            "default). If that is too slow, turn on Custom refresh in the device's Controls and shorten "
+            "the interval; this adds network traffic. Changes made from Home Assistant, route and mode "
+            "changes and stores made on the front panel show straight away. Presets can be overwritten "
+            "but the unit refuses to delete them."
+        ),
+    ),
+    "vs-808yc": KramerModel(
+        "vs-808yc",
+        "VS-808YC",
+        8,
+        8,
+        True,
+        preset_slots=16,
+        notes=(
+            "The front panel lock button, route and mode changes, and stores and recalls made on the front "
+            "panel show straight away. The unit does not reply when a blank preset is recalled, so the "
+            "integration only recalls presets known to be stored."
+        ),
+    ),
     "vs-812": KramerModel("vs-812", "VS-812", 8, 1, False, supports_off=False, supports_lock=False),
 }
 
@@ -74,3 +102,9 @@ def resolve_preset_slots(data: Mapping[str, Any]) -> int:
         return max(0, min(MAX_PRESET_SLOTS, int(data.get("preset_slots", 0))))
     except (TypeError, ValueError):
         return 0
+
+
+def resolve_notes(data: Mapping[str, Any]) -> str:
+    """Return the notes shipped with a model (empty for unknown models)."""
+    key = resolve_model_key(data.get("model"))
+    return MODELS[key].notes if key else ""

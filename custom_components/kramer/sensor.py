@@ -6,12 +6,13 @@ from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import EntityCategory
+from homeassistant.const import MATCH_ALL, EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import SOURCE_MIXED
 from .entity import KramerConfigEntry, KramerEntity, audio_input_to_name, input_to_name
+from .protocol import MODE_AFV, MODE_BREAKAWAY
 
 
 async def async_setup_entry(
@@ -20,7 +21,11 @@ async def async_setup_entry(
     """Set up the sensors that make sense for this model."""
     data = entry.runtime_data
     client = data.client
-    entities: list[KramerEntity] = [KramerLastReplySensor(entry), KramerLastErrorSensor(entry)]
+    entities: list[KramerEntity] = [
+        KramerMatrixSensor(entry),
+        KramerLastReplySensor(entry),
+        KramerLastErrorSensor(entry),
+    ]
     if client.outputs > 1:
         entities.append(KramerRoutingSensor(entry))
         if data.supports_off:
@@ -253,3 +258,92 @@ class KramerStoredPresetsSensor(KramerEntity, SensorEntity):
             if filled
         }
         return {"occupied_presets": occupied, "presets_on_unit": self._client.preset_slots}
+
+
+MATRIX_SCHEMA_VERSION = 1
+
+
+class KramerMatrixSensor(KramerEntity, SensorEntity):
+    """Everything about the unit in one place, for dashboard cards and automations.
+
+    Contract (schema_version 1): attributes are only ever added, never renamed,
+    removed or changed in type. A breaking change raises schema_version.
+    Attributes are not recorded in history, so route changes do not grow the database.
+    """
+
+    _attr_translation_key = "matrix"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _unrecorded_attributes = frozenset({MATCH_ALL})
+
+    def __init__(self, entry: KramerConfigEntry) -> None:
+        """Initialise."""
+        super().__init__(entry, "matrix")
+        self._title = entry.title
+        self._timer: Any = None
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to changes, combining bursts (such as a preset recall) into one update."""
+        self.async_on_remove(self._client.add_listener(self._schedule_write))
+        self.async_on_remove(self._cancel_timer)
+
+    @callback
+    def _schedule_write(self) -> None:
+        if self._timer is None:
+            self._timer = self.hass.loop.call_later(0.1, self._flush)
+
+    @callback
+    def _flush(self) -> None:
+        self._timer = None
+        self.async_write_ha_state()
+
+    @callback
+    def _cancel_timer(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+    @property
+    def native_value(self) -> str:
+        """Return online (the entity is unavailable while the unit does not answer)."""
+        return "online"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the unit's whole picture."""
+        data, client = self._data, self._client
+        outputs = range(1, client.outputs + 1)
+        mode = {MODE_AFV: "afv", MODE_BREAKAWAY: "breakaway"}.get(client.mode) if data.supports_modes else None
+        has_audio = data.has_audio
+        occupied = sorted(slot for slot, filled in client.preset_defined.items() if filled)
+        return {
+            "schema_version": MATRIX_SCHEMA_VERSION,
+            "name": self._title,
+            "model": data.model_name,
+            "inputs": client.inputs,
+            "outputs": client.outputs,
+            "features": {
+                "modes": data.supports_modes,
+                "audio": has_audio,
+                "off": data.supports_off,
+                "lock": data.supports_lock and client.lock_supported is not False,
+                "presets": data.preset_slots,
+            },
+            "mode": mode,
+            "input_names": list(data.input_names),
+            "audio_input_names": list(data.audio_input_names) if has_audio else [],
+            "output_names": list(data.output_names),
+            "audio_output_names": list(data.audio_output_names) if has_audio else [],
+            "video_routes": [client.routes.get(o) for o in outputs],
+            "audio_routes": [client.audio_routes.get(o) for o in outputs] if has_audio else [],
+            "presets": {
+                "slots": data.preset_slots,
+                "occupied": occupied,
+                "descriptions": {str(slot): text for slot, text in sorted(data.preset_descriptions.items()) if text},
+            },
+            "firmware": client.identity.get("firmware"),
+            "last_error": {
+                "message": client.last_error,
+                "time": client.last_error_time.isoformat() if client.last_error_time else None,
+            },
+            "locked": client.locked,
+        }

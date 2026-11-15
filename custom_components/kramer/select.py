@@ -40,7 +40,8 @@ async def async_setup_entry(
     for number, name in enumerate(data.output_names, start=1):
         entities.append(KramerOutputSelect(entry, number, name))
         if data.has_audio:
-            entities.append(KramerAudioOutputSelect(entry, number, name))
+            audio_name = data.audio_output_names[number - 1] if number <= len(data.audio_output_names) else name
+            entities.append(KramerAudioOutputSelect(entry, number, audio_name))
     if data.supports_modes:
         entities.append(KramerModeSelect(entry))
     async_add_entities(entities)

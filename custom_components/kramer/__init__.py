@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.const import Platform
@@ -14,6 +15,8 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     CONF_AUDIO_INPUT_NAMES,
+    CONF_AUDIO_OUTPUT_NAMES,
+    CONF_CUSTOM_REFRESH,
     CONF_HOST,
     CONF_INPUT_NAMES,
     CONF_INPUTS,
@@ -23,9 +26,13 @@ from .const import (
     CONF_OUTPUTS,
     CONF_PORT,
     CONF_PRESET_DESCRIPTIONS,
+    CONF_REFRESH_SECONDS,
     DEFAULT_MACHINE,
     DEFAULT_PORT,
+    DEFAULT_REFRESH,
     DOMAIN,
+    MAX_REFRESH,
+    MIN_REFRESH,
 )
 from .entity import KramerConfigEntry, KramerData
 from .models import resolve_model_name, resolve_preset_slots, resolve_supports_lock, resolve_supports_off
@@ -37,7 +44,30 @@ _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA: vol.Schema = cv.config_entry_only_config_schema(DOMAIN)
 
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.MEDIA_PLAYER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
+PLATFORMS = [
+    Platform.BINARY_SENSOR,
+    Platform.MEDIA_PLAYER,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
+
+REFRESH_KEYS = (CONF_CUSTOM_REFRESH, CONF_REFRESH_SECONDS)
+
+
+def refresh_settings(options: Mapping[str, Any]) -> tuple[bool, int]:
+    """Return (custom refresh on, seconds) from saved options, kept within the allowed range."""
+    try:
+        seconds = int(options.get(CONF_REFRESH_SECONDS, DEFAULT_REFRESH))
+    except (TypeError, ValueError):
+        seconds = DEFAULT_REFRESH
+    return bool(options.get(CONF_CUSTOM_REFRESH, False)), max(MIN_REFRESH, min(MAX_REFRESH, seconds))
+
+
+def effective_refresh(custom: bool, seconds: int) -> int:
+    """Return the interval in use: the default unless custom refresh is on."""
+    return seconds if custom else DEFAULT_REFRESH
 
 
 def default_input_names(count: int, suffix: str = "") -> list[str]:
@@ -94,6 +124,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
             "and choose Reconfigure to pick your model."
         ) from err
 
+    custom_refresh, refresh_seconds = refresh_settings(entry.options)
     preset_slots = resolve_preset_slots(data)
     breakaway = bool(data.get(CONF_MODES, True))
     client = KramerClient(
@@ -104,6 +135,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         outputs,
         supports_modes=bool(data.get(CONF_MODES, True)),
         preset_slots=preset_slots,
+        refresh_interval=effective_refresh(custom_refresh, refresh_seconds),
+    )
+    output_names = effective_names(
+        entry.options.get(CONF_OUTPUT_NAMES), default_output_names(outputs), legacy_output_names(outputs)
     )
     entry.runtime_data = KramerData(
         client=client,
@@ -118,14 +153,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
             if breakaway
             else []
         ),
-        output_names=effective_names(
-            entry.options.get(CONF_OUTPUT_NAMES), default_output_names(outputs), legacy_output_names(outputs)
+        output_names=output_names,
+        audio_output_names=(
+            effective_names(entry.options.get(CONF_AUDIO_OUTPUT_NAMES), output_names) if breakaway else []
         ),
         supports_modes=bool(data.get(CONF_MODES, True)),
         supports_off=resolve_supports_off(data),
         supports_lock=resolve_supports_lock(data),
         preset_slots=preset_slots,
         preset_descriptions=parse_descriptions(entry.options.get(CONF_PRESET_DESCRIPTIONS), preset_slots),
+        custom_refresh=custom_refresh,
+        refresh_seconds=refresh_seconds,
+        applied_options=_without_refresh(entry.options),
     )
 
     await client.async_start()
@@ -139,8 +178,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
     return True
 
 
+def _without_refresh(options: Mapping[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in options.items() if k not in REFRESH_KEYS}
+
+
 async def _reload(hass: HomeAssistant, entry: KramerConfigEntry) -> None:
-    """Reload after options or reconfiguration change."""
+    """Reload after options or reconfiguration change (not for refresh-interval changes alone)."""
+    if _without_refresh(entry.options) == entry.runtime_data.applied_options:
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

@@ -61,3 +61,17 @@ recall_preset:
       default: false
       selector:
         boolean:
+
+set_routing_mode:
+  target:
+    device:
+      integration: kramer
+  fields:
+    mode:
+      required: true
+      selector:
+        select:
+          options:
+            - afv
+            - breakaway
+          translation_key: routing_mode

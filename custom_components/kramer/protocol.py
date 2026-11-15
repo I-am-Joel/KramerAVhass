@@ -383,6 +383,17 @@ class KramerClient:
         await _close(self._writer)
         self._writer = None
 
+    @property
+    def refresh_interval(self) -> float:
+        """Return the seconds between full refreshes."""
+        return self._refresh_interval
+
+    def set_refresh_interval(self, seconds: float) -> None:
+        """Change the refresh interval; takes effect straight away."""
+        self._refresh_interval = float(seconds)
+        self._refresh_event.set()
+        self._notify()
+
     def async_request_refresh(self) -> None:
         """Ask for a full refresh as soon as possible."""
         self._refresh_event.set()

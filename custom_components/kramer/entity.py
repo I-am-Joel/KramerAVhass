@@ -6,11 +6,12 @@ from collections.abc import Awaitable
 from dataclasses import dataclass, field
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
-from .const import DOMAIN, SOURCE_MIXED, SOURCE_OFF
+from .const import CONF_CUSTOM_REFRESH, CONF_REFRESH_SECONDS, DEFAULT_REFRESH, DOMAIN, SOURCE_MIXED, SOURCE_OFF
 from .protocol import KramerClient, KramerError
 
 
@@ -28,6 +29,10 @@ class KramerData:
     preset_slots: int = 0
     preset_descriptions: dict[int, str] = field(default_factory=dict)
     audio_input_names: list[str] = field(default_factory=list)
+    audio_output_names: list[str] = field(default_factory=list)
+    custom_refresh: bool = False
+    refresh_seconds: int = 60
+    applied_options: dict = field(default_factory=dict)
 
     @property
     def breakaway(self) -> bool:
@@ -147,3 +152,19 @@ class KramerEntity(Entity):
             await coro
         except KramerError as err:
             raise HomeAssistantError(f"Kramer command failed: {err}") from err
+
+
+def save_refresh(
+    hass: HomeAssistant, entry: KramerConfigEntry, *, custom: bool | None = None, seconds: int | None = None
+) -> None:
+    """Remember the refresh settings in the entry's options and apply them to the running unit."""
+    data = entry.runtime_data
+    if custom is not None:
+        data.custom_refresh = custom
+    if seconds is not None:
+        data.refresh_seconds = int(seconds)
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, CONF_CUSTOM_REFRESH: data.custom_refresh, CONF_REFRESH_SECONDS: data.refresh_seconds},
+    )
+    data.client.set_refresh_interval(data.refresh_seconds if data.custom_refresh else DEFAULT_REFRESH)

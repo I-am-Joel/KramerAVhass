@@ -34,6 +34,7 @@ from . import (
 )
 from .const import (
     CONF_AUDIO_INPUT_NAMES,
+    CONF_AUDIO_OUTPUT_NAMES,
     CONF_HOST,
     CONF_INPUT_NAMES,
     CONF_INPUTS,
@@ -53,7 +54,7 @@ from .const import (
     SOURCE_OFF,
 )
 from .entity import KramerData
-from .models import MAX_PORTS, MAX_PRESET_SLOTS, MODELS, OTHER, resolve_model_key, resolve_preset_slots
+from .models import MAX_PORTS, MAX_PRESET_SLOTS, MODELS, OTHER, resolve_model_key, resolve_notes, resolve_preset_slots
 from .presets import (
     parse_descriptions,
     serialise_descriptions,
@@ -152,6 +153,8 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             if (result := await self._finish(errors)) is not None:
                 return result
 
+        if user_input is not None:  # an error: keep what was typed
+            cur = {**cur, **user_input}
         schema = vol.Schema(
             {
                 vol.Required(CONF_NAME, default=cur.get(CONF_NAME, "Kramer Matrix")): TextSelector(),
@@ -190,6 +193,8 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             if (result := await self._finish(errors)) is not None:
                 return result
 
+        if user_input is not None:  # an error: keep what was typed
+            cur = {**cur, **user_input}
         schema = vol.Schema(
             {
                 vol.Required(CONF_MODEL_NAME, default=cur.get(CONF_MODEL_NAME, "")): TextSelector(),
@@ -272,8 +277,14 @@ class KramerOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Choose between names and presets (models without presets go straight to names)."""
-        if resolve_preset_slots(self.config_entry.data) > 0:
-            return self.async_show_menu(step_id="init", menu_options=["names", "presets"])
+        notes = resolve_notes(self.config_entry.data)
+        has_presets = resolve_preset_slots(self.config_entry.data) > 0
+        if has_presets or notes:
+            return self.async_show_menu(
+                step_id="init",
+                menu_options=["names", "presets"] if has_presets else ["names"],
+                description_placeholders={"notes": notes or " "},
+            )
         return await self.async_step_names()
 
     async def async_step_names(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -302,10 +313,18 @@ class KramerOptionsFlow(OptionsFlow):
             if breakaway:
                 audio_names, err_audio = _parse_names(user_input[CONF_AUDIO_INPUT_NAMES], audio_defaults)
                 check_inputs(CONF_AUDIO_INPUT_NAMES, audio_names, err_audio)
+            audio_out_names: list[str] = []
             if err_out:
                 errors[CONF_OUTPUT_NAMES] = err_out
             elif len({n.casefold() for n in out_names}) != len(out_names):
                 errors[CONF_OUTPUT_NAMES] = "duplicate_names"
+            elif breakaway:
+                # A blank audio output name uses the output's own name.
+                audio_out_names, err_ao = _parse_names(user_input[CONF_AUDIO_OUTPUT_NAMES], out_names)
+                if err_ao:
+                    errors[CONF_AUDIO_OUTPUT_NAMES] = err_ao
+                elif len({n.casefold() for n in audio_out_names}) != len(audio_out_names):
+                    errors[CONF_AUDIO_OUTPUT_NAMES] = "duplicate_names"
             if not errors:
                 saved = {
                     **entry.options,
@@ -316,16 +335,31 @@ class KramerOptionsFlow(OptionsFlow):
                     saved[CONF_AUDIO_INPUT_NAMES] = [
                         n if n != d else "" for n, d in zip(audio_names, audio_defaults, strict=True)
                     ]
+                    saved[CONF_AUDIO_OUTPUT_NAMES] = [
+                        n if n != d else "" for n, d in zip(audio_out_names, out_names, strict=True)
+                    ]
                 return self.async_create_entry(data=saved)
 
         saved_in = effective_names(entry.options.get(CONF_INPUT_NAMES), in_defaults, legacy_input_names(inputs))
         saved_out = effective_names(entry.options.get(CONF_OUTPUT_NAMES), out_defaults, legacy_output_names(outputs))
         multiline = TextSelector(TextSelectorConfig(multiline=True))
-        fields: dict[Any, Any] = {vol.Required(CONF_INPUT_NAMES, default="\n".join(saved_in)): multiline}
+        typed = user_input or {}  # after an error, keep what was typed
+        fields: dict[Any, Any] = {
+            vol.Required(CONF_INPUT_NAMES, default=typed.get(CONF_INPUT_NAMES, "\n".join(saved_in))): multiline
+        }
         if breakaway:
             saved_audio = effective_names(entry.options.get(CONF_AUDIO_INPUT_NAMES), audio_defaults)
-            fields[vol.Required(CONF_AUDIO_INPUT_NAMES, default="\n".join(saved_audio))] = multiline
-        fields[vol.Required(CONF_OUTPUT_NAMES, default="\n".join(saved_out))] = multiline
+            fields[
+                vol.Required(CONF_AUDIO_INPUT_NAMES, default=typed.get(CONF_AUDIO_INPUT_NAMES, "\n".join(saved_audio)))
+            ] = multiline
+        fields[vol.Required(CONF_OUTPUT_NAMES, default=typed.get(CONF_OUTPUT_NAMES, "\n".join(saved_out)))] = multiline
+        if breakaway:
+            saved_audio_out = effective_names(entry.options.get(CONF_AUDIO_OUTPUT_NAMES), saved_out)
+            fields[
+                vol.Required(
+                    CONF_AUDIO_OUTPUT_NAMES, default=typed.get(CONF_AUDIO_OUTPUT_NAMES, "\n".join(saved_audio_out))
+                )
+            ] = multiline
         return self.async_show_form(step_id="names", data_schema=vol.Schema(fields), errors=errors)
 
     async def async_step_presets(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

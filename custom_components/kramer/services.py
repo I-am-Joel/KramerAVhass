@@ -15,11 +15,12 @@ from homeassistant.helpers import entity_registry as er
 from .const import DOMAIN, SOURCE_OFF
 from .entity import KramerConfigEntry, KramerData
 from .presets import resolve_slot
-from .protocol import MODE_AFV, KramerError
+from .protocol import MODE_AFV, MODE_BREAKAWAY, KramerError
 
 SERVICE_SET_ROUTE = "set_route"
 SERVICE_STORE_PRESET = "store_preset"
 SERVICE_RECALL_PRESET = "recall_preset"
+SERVICE_SET_ROUTING_MODE = "set_routing_mode"
 
 ATTR_INPUT = "input"
 ATTR_OUTPUTS = "outputs"
@@ -27,6 +28,8 @@ ATTR_LAYER = "layer"
 ATTR_SLOT = "preset"
 ATTR_AUDIO_ONLY = "audio_only"
 ATTR_CONFIRM_OVERWRITE = "confirm_overwrite"
+
+ATTR_MODE = "mode"
 
 ALL = "all"
 
@@ -36,6 +39,10 @@ _SET_ROUTE_SCHEMA = vol.Schema(
         vol.Required(ATTR_OUTPUTS): vol.All(cv.ensure_list, [cv.string]),
         vol.Optional(ATTR_LAYER, default="both"): vol.In(["both", "video", "audio"]),
     }
+).extend(cv.TARGET_SERVICE_FIELDS)
+
+_ROUTING_MODE_SCHEMA = vol.Schema(
+    {vol.Required(ATTR_MODE): vol.In(["afv", "breakaway"])},
 ).extend(cv.TARGET_SERVICE_FIELDS)
 
 _STORE_SCHEMA = vol.Schema(
@@ -180,6 +187,15 @@ async def _handle_set_route(hass: HomeAssistant, call: ServiceCall) -> None:
             done.append(output)
 
 
+async def _handle_set_routing_mode(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Choose Audio follow video or Breakaway."""
+    for entry in _target_entries(hass, call):
+        data = entry.runtime_data
+        if not data.supports_modes:
+            raise ServiceValidationError(f"{data.model_name} has no routing modes")
+        await _run(data.client.async_set_mode(MODE_AFV if call.data[ATTR_MODE] == "afv" else MODE_BREAKAWAY))
+
+
 async def _handle_store_preset(hass: HomeAssistant, call: ServiceCall) -> None:
     """Store the present routing in a slot (refuses an occupied slot unless confirmed)."""
     for entry in _target_entries(hass, call):
@@ -215,6 +231,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def set_route(call: ServiceCall) -> None:
         await _handle_set_route(hass, call)
 
+    async def set_routing_mode(call: ServiceCall) -> None:
+        await _handle_set_routing_mode(hass, call)
+
     async def store_preset(call: ServiceCall) -> None:
         await _handle_store_preset(hass, call)
 
@@ -222,5 +241,6 @@ def async_register_services(hass: HomeAssistant) -> None:
         await _handle_recall_preset(hass, call)
 
     hass.services.async_register(DOMAIN, SERVICE_SET_ROUTE, set_route, schema=_SET_ROUTE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_SET_ROUTING_MODE, set_routing_mode, schema=_ROUTING_MODE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_STORE_PRESET, store_preset, schema=_STORE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_RECALL_PRESET, recall_preset, schema=_RECALL_SCHEMA)

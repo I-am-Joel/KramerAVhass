@@ -50,15 +50,17 @@
         "menu_options": {
           "names": "Input and output names",
           "presets": "Presets"
-        }
+        },
+        "description": "{notes}"
       },
       "names": {
         "title": "Input and output names",
-        "description": "One name per line, in order. Leave a line blank to use the default. Units with separate video and audio have a name list for each; an output's name gets \"Video\" or \"Audio\" added in Home Assistant.",
+        "description": "One name per line, in order. Leave a line blank to use the default. Units with separate video and audio have a name list for each. An output's name gets \"Video\" or \"Audio\" added in Home Assistant. A blank audio output name uses the output's own name.",
         "data": {
           "input_names": "Video input names (or input names)",
           "audio_input_names": "Audio input names",
-          "output_names": "Output names"
+          "output_names": "Output names",
+          "audio_output_names": "Audio output names"
         }
       },
       "presets": {
@@ -140,6 +142,9 @@
     "switch": {
       "panel_lock": {
         "name": "Front panel lock"
+      },
+      "custom_refresh": {
+        "name": "Custom refresh"
       }
     },
     "binary_sensor": {
@@ -171,6 +176,14 @@
       },
       "firmware": {
         "name": "Firmware version"
+      },
+      "matrix": {
+        "name": "Matrix"
+      }
+    },
+    "number": {
+      "refresh_interval": {
+        "name": "Refresh interval"
       }
     }
   },
@@ -186,6 +199,12 @@
         "both": "Video and audio",
         "video": "Video only",
         "audio": "Audio only"
+      }
+    },
+    "routing_mode": {
+      "options": {
+        "afv": "Audio follow video",
+        "breakaway": "Breakaway"
       }
     }
   },
@@ -237,6 +256,16 @@
         "audio_only": {
           "name": "Audio only",
           "description": "Recall only the audio routes (models with separate audio)."
+        }
+      }
+    },
+    "set_routing_mode": {
+      "name": "Set routing mode",
+      "description": "Choose Audio follow video or Breakaway. In Audio follow video every audio output follows its video input, and separate audio routes are lost.",
+      "fields": {
+        "mode": {
+          "name": "Mode",
+          "description": "Audio follow video, or Breakaway (audio and video routed separately)."
         }
       }
     }

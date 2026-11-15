@@ -8,7 +8,7 @@ the unit.
 This is a fork of [krohrbaugh/kramer-homeassistant][original] by Kevin
 Rohrbaugh, and it would not exist without his work. See [Credits](#credits).
 
-> **Status:** early release. I have tested published features on three units (Kramer
+> **Status:** early release (version 0.14.1). I have tested published features on three units (Kramer
 > VS-162AVRCA, VS-812 & VS-808YC), respectively connected through Brainboxes ES-247 and ES-246 serial-to-Ethernet
 > bridges. Other models and bridges are expected to work but are untested.
 
@@ -23,7 +23,11 @@ Depending on the features your switcher supports, the integration creates one de
 | Output 001 Video, Output 002 Video ... | `select` | One per audio and one per video output. Choose which input feeds that output, or **Off** to turn the output off. |
 | Mode | `select` | **Audio follow video** or **Breakaway**. |
 | Front panel lock | `switch` | Locks or unlocks the buttons on the unit. |
-| Read only sensors | Numerous sensors are exposed. Depending on what can be read from the unit, these can include firmware version, routing summary, total number of stored presets and connection status |
+| Status | `sensor` | One diagnostic sensor per unit that holds the whole picture of the unit (see [The Status sensor](#the-status-sensor)). |
+| Custom refresh | `switch` | Turns on a refresh interval of your own (see below). Found in the device's **Controls**. |
+| Refresh interval | `number` | How often, in seconds (5 to 1800), the integration re-reads the unit's full state. Only available while **Custom refresh** is on. |
+| In step | `binary_sensor` | One per output, on models with separate audio. On while that output's audio and video come from the same input. |
+| Read only sensors | `sensor`, `binary_sensor` | Numerous sensors are exposed. Depending on what can be read from the unit, these can include firmware version, routing summary, total number of stored presets and connection status. |
 
 All of these update in HASS and on the device front panel, where available. Default naming of inputs and outputs are
 "Input 001 Audio", "Input 002 Video" etc and "Output 001 Audio", "Output 002 Video" etc, until you rename them.
@@ -52,6 +56,33 @@ Some bridges pass serial data to every connected client but older firmware may
 drop connections when two clients are attached. Do not leave a second tool
 (for example `nc` or another Home Assistant integration) connected to the same
 port as this Kramer AV integration.
+
+## The Status sensor
+
+Each unit has one **Status** sensor (a diagnostic entity, with an entity ID ending `_status`) that holds the whole state of the unit in one place. It is designed for dashboard cards and automations. Its state is `online` while the unit is answering, and it is unavailable otherwise. Everything else is in its attributes:
+
+| Attribute | Meaning |
+| -- | -- |
+| `schema_version` | Version of this attribute layout (see below). |
+| `name`, `model` | The name you gave the device and the model name. |
+| `inputs`, `outputs` | Number of inputs and outputs. |
+| `features` | What the model supports: `modes`, `audio`, `off`, `lock` (each true or false) and `presets` (the number of presets, 0 if none). |
+| `mode` | `afv` or `breakaway`, or empty on models without modes. |
+| `input_names`, `audio_input_names` | Video (or only) and audio input names, in order. The audio list is empty on models without separate audio. |
+| `output_names`, `audio_output_names` | Video (or only) and audio output names, in order. The audio list is empty on models without separate audio. |
+| `video_routes`, `audio_routes` | For each output in order, the number of the input feeding it (0 means off). |
+| `presets` | `slots` (how many), `occupied` (the preset numbers in use) and `descriptions` (your HASS descriptions). |
+| `firmware` | Firmware version, where the unit reports it. |
+| `last_error` | The latest error message and the time it happened. |
+| `locked` | Whether the front panel is locked, where the model supports it. |
+
+The attributes are not stored in Home Assistant's history, so routing changes do not make the database grow. Only the sensor's state is recorded.
+
+**Stable layout.** Attributes may be added in future versions, but existing ones are never renamed, removed or changed in type. A change that breaks this would raise `schema_version`, so anything you build on this sensor can check that number first.
+
+## Requirements
+
+Home Assistant 2025.1 or later.
 
 ## Before you install
 
@@ -106,7 +137,7 @@ Copy the `custom_components/kramer` folder from this repository into the
 
 Actions are called from scripts, automations, dashboard buttons or Developer tools → Actions. Each one targets a Kramer device (choose the switcher as the target).
 
-Inputs and outputs can be given by number or by name (names are the ones set under Configure → Input and output names, and are not case sensitive).
+Inputs and outputs can be given by number or by name (names are the ones set under Configure → Input and output names, and are not case sensitive). An input can be given by its video or audio name. An output can be given by its video name, its audio name or its shared name (for example "Output 001", which covers "Output 001 Video" and "Output 001 Audio").
 
 ### `kramer.set_route`
 
@@ -116,6 +147,7 @@ Sends one input to one or more outputs.
 | --- | --- | --- |
 | `input` | yes | Input number or name. `Off` (or `0`) disconnects the output, on models that can. |
 | `outputs` | yes | One or more output numbers or names, or `all`. |
+| `layer` | no | `both` (the default), `video` or `audio`. On models with separate audio, `video` or `audio` changes only that layer. Changing `audio` on its own needs the unit to be in Breakaway mode. |
 
 ```yaml
 action: kramer.set_route
@@ -129,6 +161,24 @@ data:
 ```
 
 All names and numbers are checked before anything is sent. If a command fails part-way, the error lists the outputs already switched.
+
+### `kramer.set_routing_mode`
+
+Sets the unit's routing mode, as the **Mode** select does.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `mode` | yes | `afv` (audio follow video) or `breakaway` (audio and video routed separately). |
+
+```yaml
+action: kramer.set_routing_mode
+target:
+  device_id: <your Kramer device>
+data:
+  mode: breakaway
+```
+
+Models without routing modes (for example the VS-812) refuse this action with an error, and nothing is sent to the unit.
 
 ### `kramer.store_preset`
 

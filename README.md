@@ -21,7 +21,7 @@ Depending on the features your switcher supports, the integration creates one de
 | Device name (for example "Studio 1 - VS-812") | `media_player` | Choose one input for **all** outputs. Shows **Mixed** when the outputs are not all set to the same input, and **Off** when all are disconnected. |
 | All outputs | `select` | The same as the media player, exposed as a simple input list drop-down that sends to all outputs at once. |
 | Output 001 Video, Output 002 Video ... | `select` | One per audio and one per video output. Choose which input feeds that output, or **Off** to turn the output off. |
-| Mode | `select` | **Audio follow video** or **Breakaway**. |
+| Mode | `select` | **Audio follows video** or **Breakaway**. |
 | Front panel lock | `switch` | Locks or unlocks the buttons on the unit. |
 | Status | `sensor` | One diagnostic sensor per unit that holds the whole picture of the unit (see [The Status sensor](#the-status-sensor)). |
 | Custom refresh | `switch` | Turns on a refresh interval of your own (see below). Found in the device's **Controls**. |
@@ -71,7 +71,7 @@ Each unit has one **Status** sensor (a diagnostic entity, with an entity ID endi
 | `input_names`, `audio_input_names` | Video (or only) and audio input names, in order. The audio list is empty on models without separate audio. |
 | `output_names`, `audio_output_names` | Video (or only) and audio output names, in order. The audio list is empty on models without separate audio. |
 | `video_routes`, `audio_routes` | For each output in order, the number of the input feeding it (0 means off). |
-| `presets` | `slots` (how many), `occupied` (the preset numbers in use) and `descriptions` (your HASS descriptions). |
+| `presets` | `slots` (how many), `filled` (the preset numbers in use) and `descriptions` (your HASS descriptions). |
 | `firmware` | Firmware version, where the unit reports it. |
 | `last_error` | The latest error message and the time it happened. |
 | `locked` | Whether the front panel is locked, where the model supports it. |

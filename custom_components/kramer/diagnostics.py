@@ -57,7 +57,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
             "locked": client.locked,
             "routes": dict(client.routes),
             "audio_routes": dict(client.audio_routes),
-            "occupied_preset_slots": sorted(slot for slot, filled in client.preset_defined.items() if filled),
+            "filled_preset_slots": sorted(slot for slot, filled in client.preset_defined.items() if filled),
             "last_reply": client.last_reply.isoformat() if client.last_reply else None,
             "last_error": client.last_error,
             "last_error_time": client.last_error_time.isoformat() if client.last_error_time else None,

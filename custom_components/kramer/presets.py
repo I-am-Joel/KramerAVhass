@@ -59,9 +59,9 @@ def resolve_slot(token: object, descriptions: Mapping[int, str], slots: int) -> 
     raise ValueError(f'No slot is described as "{text}"')
 
 
-def slot_label(slot: int, occupied: bool | None, description: str | None) -> str:
+def slot_label(slot: int, filled: bool | None, description: str | None) -> str:
     """Return the line shown for a slot in the preset picker."""
-    state = "Occupied" if occupied else "Blank" if occupied is False else "Not checked"
+    state = "Filled" if filled else "Empty" if filled is False else "Not checked"
     text = f"{slot:02d} - {state}"
     if description:
         text += f" - {description}"

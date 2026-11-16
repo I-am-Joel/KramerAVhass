@@ -70,7 +70,7 @@ class KramerInStepSensor(KramerEntity, BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | bool | None]:
-        """Show the two inputs and whether the unit is in Audio follow video."""
+        """Show the two inputs and whether the unit is in Audio follows video."""
         mode = self._client.mode
         return {
             "video_input": input_to_name(self._data, self._client.routes.get(self._output)),

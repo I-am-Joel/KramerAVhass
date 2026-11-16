@@ -25,7 +25,7 @@ from .entity import (
 from .protocol import MODE_AFV, MODE_BREAKAWAY
 
 MODE_LABELS = {
-    MODE_AFV: "Audio follow video",
+    MODE_AFV: "Audio follows video",
     MODE_BREAKAWAY: "Breakaway",
 }
 
@@ -102,7 +102,7 @@ class _OutputLayerSelect(KramerEntity, SelectEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, bool | None] | None:
-        """Say whether the unit is in Audio follow video, and whether this output is in step."""
+        """Say whether the unit is in Audio follows video, and whether this output is in step."""
         if not self._data.has_audio:
             return None
         mode = self._client.mode
@@ -127,7 +127,7 @@ class KramerOutputSelect(_OutputLayerSelect):
         return input_to_name(self._data, self._client.routes.get(self._output))
 
     async def async_select_option(self, option: str) -> None:
-        """Route video to this output (in Audio follow video the unit moves audio too)."""
+        """Route video to this output (in Audio follows video the unit moves audio too)."""
         await self._call(self._client.async_set_route(self._output, name_to_input(self._data, option)))
 
 
@@ -153,7 +153,7 @@ class KramerAudioOutputSelect(_OutputLayerSelect):
         """Route audio to this output, only in breakaway mode."""
         if self._client.mode == MODE_AFV:
             raise ServiceValidationError(
-                "Switch the mode to Breakaway first. In Audio follow video the unit moves audio "
+                "Switch the mode to Breakaway first. In Audio follows video the unit moves audio "
                 "together with video, so audio cannot be changed on its own."
             )
         await self._call(self._client.async_set_audio_route(self._output, audio_name_to_input(self._data, option)))
@@ -179,7 +179,7 @@ class KramerModeSelect(KramerEntity, SelectEntity):
     def extra_state_attributes(self) -> dict[str, str]:
         """Warn that audio and video can be split."""
         return {
-            "note": "Breakaway lets audio and video follow different inputs. Choosing Audio follow video "
+            "note": "Breakaway lets audio and video follow different inputs. Choosing Audio follows video "
             "makes every audio output follow its video input at once, and separate audio routes are lost."
         }
 

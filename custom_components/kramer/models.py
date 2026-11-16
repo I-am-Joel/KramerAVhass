@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 OTHER = "other"
-MAX_PORTS = 64
+MAX_PORTS = 127
 MAX_PRESET_SLOTS = 99
 
 

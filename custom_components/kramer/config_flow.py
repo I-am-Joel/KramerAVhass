@@ -262,8 +262,8 @@ class KramerOptionsFlow(OptionsFlow):
         )
 
     def _placeholders(self, data: KramerData) -> dict[str, str]:
-        occupied = data.client.preset_defined.get(self._slot)
-        state = "Occupied" if occupied else "Blank" if occupied is False else "Not checked"
+        filled = data.client.preset_defined.get(self._slot)
+        state = "Filled" if filled else "Empty" if filled is False else "Not checked"
         return {
             "preset": f"{self._slot:02d}",
             "state": state,
@@ -288,16 +288,14 @@ class KramerOptionsFlow(OptionsFlow):
     # -- steps ----------------------------------------------------------
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Choose between names and presets (models without presets go straight to names)."""
+        """Show the device name and notes, then choose between names and presets."""
         notes = resolve_notes(self.config_entry.data)
         has_presets = resolve_preset_slots(self.config_entry.data) > 0
-        if has_presets or notes:
-            return self.async_show_menu(
-                step_id="init",
-                menu_options=["names", "presets"] if has_presets else ["names"],
-                description_placeholders={"notes": notes or " ", "name": self.config_entry.title},
-            )
-        return await self.async_step_names()
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["names", "presets"] if has_presets else ["names"],
+            description_placeholders={"notes": notes or " ", "name": self.config_entry.title},
+        )
 
     async def async_step_names(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Edit the names, one per line (units with separate audio also have audio input names)."""
@@ -383,7 +381,7 @@ class KramerOptionsFlow(OptionsFlow):
         return await self.async_step_names(user_input)
 
     async def async_step_presets(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Choose a slot (every slot is listed, with whether it is occupied on the unit)."""
+        """Choose a slot (every slot is listed, with whether it is filled on the unit)."""
         data = self._live_data()
         if data is None:
             return self.async_abort(reason="unit_unavailable")
@@ -442,16 +440,16 @@ class KramerOptionsFlow(OptionsFlow):
             return self.async_abort(reason="unit_unavailable")
         client = data.client
         try:
-            occupied = await client.async_preset_defined(self._slot)
+            filled = await client.async_preset_defined(self._slot)
         except KramerError:
             return self.async_abort(reason="unit_unavailable")
-        if occupied:
+        if filled:
             await self._read_contents(data)
         errors: dict[str, str] = {}
         placeholders = self._placeholders(data)
 
         if user_input is not None:
-            if occupied and not user_input.get("confirm"):
+            if filled and not user_input.get("confirm"):
                 errors["confirm"] = "confirm_required"
             else:
                 try:
@@ -463,12 +461,12 @@ class KramerOptionsFlow(OptionsFlow):
                     return self.async_abort(reason="preset_stored", description_placeholders=placeholders)
 
         fields: dict[Any, Any] = self._scope_field(data)
-        if occupied:
+        if filled:
             fields[vol.Required("confirm", default=False)] = BooleanSelector()
         placeholders["warning"] = (
-            f"**Preset {self._slot:02d} is occupied and storing will overwrite it.** {placeholders['contents']}"
-            if occupied
-            else f"Preset {self._slot:02d} is blank, so nothing will be overwritten."
+            f"**Preset {self._slot:02d} is filled and storing will overwrite it.** {placeholders['contents']}"
+            if filled
+            else f"Preset {self._slot:02d} is empty, so nothing will be overwritten."
         )
         return self.async_show_form(
             step_id="store", data_schema=vol.Schema(fields), errors=errors, description_placeholders=placeholders
@@ -481,11 +479,11 @@ class KramerOptionsFlow(OptionsFlow):
             return self.async_abort(reason="unit_unavailable")
         client = data.client
         try:
-            occupied = await client.async_preset_defined(self._slot)
+            filled = await client.async_preset_defined(self._slot)
         except KramerError:
             return self.async_abort(reason="unit_unavailable")
         placeholders = self._placeholders(data)
-        if not occupied:
+        if not filled:
             return self.async_abort(reason="slot_blank", description_placeholders=placeholders)
         await self._read_contents(data)
         placeholders = self._placeholders(data)

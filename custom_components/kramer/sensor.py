@@ -257,7 +257,7 @@ class KramerStoredPresetsSensor(KramerEntity, SensorEntity):
             for slot, filled in sorted(self._client.preset_defined.items())
             if filled
         }
-        return {"occupied_presets": occupied, "presets_on_unit": self._client.preset_slots}
+        return {"filled_presets": occupied, "presets_on_unit": self._client.preset_slots}
 
 
 STATUS_SCHEMA_VERSION = 1
@@ -314,7 +314,7 @@ class KramerStatusSensor(KramerEntity, SensorEntity):
         outputs = range(1, client.outputs + 1)
         mode = {MODE_AFV: "afv", MODE_BREAKAWAY: "breakaway"}.get(client.mode) if data.supports_modes else None
         has_audio = data.has_audio
-        occupied = sorted(slot for slot, filled in client.preset_defined.items() if filled)
+        filled = sorted(slot for slot, is_filled in client.preset_defined.items() if is_filled)
         return {
             "schema_version": STATUS_SCHEMA_VERSION,
             "name": self._title,
@@ -337,7 +337,7 @@ class KramerStatusSensor(KramerEntity, SensorEntity):
             "audio_routes": [client.audio_routes.get(o) for o in outputs] if has_audio else [],
             "presets": {
                 "slots": data.preset_slots,
-                "occupied": occupied,
+                "filled": filled,
                 "descriptions": {str(slot): text for slot, text in sorted(data.preset_descriptions.items()) if text},
             },
             "firmware": client.identity.get("firmware"),

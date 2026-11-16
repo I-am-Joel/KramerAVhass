@@ -169,7 +169,7 @@ async def _handle_set_route(hass: HomeAssistant, call: ServiceCall) -> None:
                 raise ServiceValidationError(f"{data.model_name} has no separate audio")
             if data.client.mode == MODE_AFV:
                 raise ServiceValidationError(
-                    "Switch the mode to Breakaway first. In Audio follow video the unit moves audio "
+                    "Switch the mode to Breakaway first. In Audio follows video the unit moves audio "
                     "together with video, so audio cannot be changed on its own."
                 )
         done: list[int] = []
@@ -191,7 +191,7 @@ async def _handle_set_route(hass: HomeAssistant, call: ServiceCall) -> None:
 
 
 async def _handle_set_routing_mode(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Choose Audio follow video or Breakaway."""
+    """Choose Audio follows video or Breakaway."""
     for entry in _target_entries(hass, call):
         data = entry.runtime_data
         if not data.supports_modes:
@@ -200,17 +200,17 @@ async def _handle_set_routing_mode(hass: HomeAssistant, call: ServiceCall) -> No
 
 
 async def _handle_store_preset(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Store the present routing in a slot (refuses an occupied slot unless confirmed)."""
+    """Store the present routing in a slot (refuses an filled slot unless confirmed)."""
     for entry in _target_entries(hass, call):
         data = entry.runtime_data
         slot = _resolve_preset_slot(data, call.data[ATTR_SLOT])
         audio_only = call.data[ATTR_AUDIO_ONLY]
         _check_audio_only(data, audio_only)
         try:
-            occupied = await data.client.async_preset_defined(slot)
+            filled = await data.client.async_preset_defined(slot)
         except KramerError as err:
             raise HomeAssistantError(f"Kramer command failed: {err}") from err
-        if occupied and not call.data[ATTR_CONFIRM_OVERWRITE]:
+        if filled and not call.data[ATTR_CONFIRM_OVERWRITE]:
             raise ServiceValidationError(
                 f"Preset {slot} already exists and storing would overwrite it. "
                 f"Set {ATTR_CONFIRM_OVERWRITE} to true if that is what you want."

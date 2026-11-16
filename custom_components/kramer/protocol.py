@@ -62,7 +62,7 @@ _NOTIFY_CODES = (4, 5)
 
 _PACKET_SIZE = 4
 
-# How often to re-check which preset slots are occupied (seconds).
+# How often to re-check which preset slots are filled (seconds).
 PRESET_SCAN_INTERVAL = 300.0
 
 
@@ -424,7 +424,7 @@ class KramerClient:
     async def async_set_audio_route(self, output: int, input_number: int) -> None:
         """Route an input's audio to one output (output 0 = all outputs).
 
-        In Audio follow video mode the unit moves video as well, so callers
+        In Audio follows video mode the unit moves video as well, so callers
         should only use this in breakaway mode.
         """
         if not 0 <= output <= self._outputs:
@@ -631,7 +631,7 @@ class KramerClient:
         if instruction == INSTR_SWITCH_VIDEO:
             self._apply_route(packet.output, packet.input)
             if self._supports_modes and self.mode == MODE_AFV:
-                # In Audio follow video the unit announces only the video route.
+                # In Audio follows video the unit announces only the video route.
                 self._apply_audio_route(packet.output, packet.input)
             self._notify()
         elif instruction == INSTR_SWITCH_AUDIO:
@@ -791,7 +791,7 @@ class KramerClient:
         self._notify()
 
     async def _scan_presets_if_due(self, force: bool = False) -> None:
-        """Check which preset slots are occupied, at most every few minutes."""
+        """Check which preset slots are filled, at most every few minutes."""
         if self._preset_slots <= 0:
             return
         now = asyncio.get_running_loop().time()
@@ -813,7 +813,7 @@ class KramerClient:
     # ------------------------------------------------------------------
 
     async def async_scan_presets(self) -> None:
-        """Re-check which slots are occupied now (about a second or two)."""
+        """Re-check which slots are filled now (about a second or two)."""
         await self._scan_presets_if_due(force=True)
 
     def _check_slot(self, slot: int) -> None:
@@ -869,7 +869,7 @@ class KramerClient:
     async def async_recall_preset(self, slot: int, audio_only: bool = False) -> None:
         """Recall a stored setup, then re-read everything the unit now holds."""
         if not await self.async_preset_defined(slot):
-            raise KramerCommandError(f"Preset {slot} is blank")
+            raise KramerCommandError(f"Preset {slot} is empty")
         instruction = INSTR_RECALL_AUDIO if audio_only else INSTR_RECALL_VIDEO
         # The unit acknowledges an audio recall with the video recall code.
         await self._request(

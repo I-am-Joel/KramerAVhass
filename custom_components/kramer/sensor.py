@@ -269,6 +269,12 @@ class KramerStatusSensor(KramerEntity, SensorEntity):
     Contract (schema_version 1): attributes are only ever added, never renamed,
     removed or changed in type. A breaking change raises schema_version.
     Attributes are not recorded in history, so route changes do not grow the database.
+
+    Unlike the other entities this one stays available while the unit is off. Its
+    state is then "offline" and it keeps describing the unit's layout (model, number of
+    inputs and outputs, features and names, all of which come from this integration's
+    own setup), so a dashboard card can still draw the unit. What only the unit knows
+    (routes, mode, lock and which presets are filled) is cleared until it answers again.
     """
 
     _attr_translation_key = "status"
@@ -303,18 +309,31 @@ class KramerStatusSensor(KramerEntity, SensorEntity):
             self._timer = None
 
     @property
+    def available(self) -> bool:
+        """Stay available while the unit is off, so the layout can still be read."""
+        return True
+
+    @property
     def native_value(self) -> str:
-        """Return online (the entity is unavailable while the unit does not answer)."""
-        return "online"
+        """Return online while the unit answers, otherwise offline."""
+        return "online" if self._client.available else "offline"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the unit's whole picture."""
         data, client = self._data, self._client
+        online = client.available
         outputs = range(1, client.outputs + 1)
-        mode = {MODE_AFV: "afv", MODE_BREAKAWAY: "breakaway"}.get(client.mode) if data.supports_modes else None
+        mode = (
+            {MODE_AFV: "afv", MODE_BREAKAWAY: "breakaway"}.get(client.mode)
+            if data.supports_modes and online
+            else None
+        )
         has_audio = data.has_audio
-        filled = sorted(slot for slot, is_filled in client.preset_defined.items() if is_filled)
+        # Only the unit knows these, so they are cleared while it is off.
+        filled = sorted(slot for slot, is_filled in client.preset_defined.items() if is_filled) if online else []
+        video_routes = [client.routes.get(o) if online else None for o in outputs]
+        audio_routes = [client.audio_routes.get(o) if online else None for o in outputs] if has_audio else []
         return {
             "schema_version": STATUS_SCHEMA_VERSION,
             "name": self._title,
@@ -333,8 +352,8 @@ class KramerStatusSensor(KramerEntity, SensorEntity):
             "audio_input_names": list(data.audio_input_names) if has_audio else [],
             "output_names": list(data.output_names),
             "audio_output_names": list(data.audio_output_names) if has_audio else [],
-            "video_routes": [client.routes.get(o) for o in outputs],
-            "audio_routes": [client.audio_routes.get(o) for o in outputs] if has_audio else [],
+            "video_routes": video_routes,
+            "audio_routes": audio_routes,
             "presets": {
                 "slots": data.preset_slots,
                 "filled": filled,
@@ -345,5 +364,5 @@ class KramerStatusSensor(KramerEntity, SensorEntity):
                 "message": client.last_error,
                 "time": client.last_error_time.isoformat() if client.last_error_time else None,
             },
-            "locked": client.locked,
+            "locked": client.locked if online else None,
         }

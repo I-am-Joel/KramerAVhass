@@ -1176,9 +1176,52 @@ async def test_status_entity_contents_and_contract(hass: HomeAssistant) -> None:
     await settle(hass, entry, 0.5)
     a = state_of(hass, entry, "sensor", "status").attributes
     assert a["video_routes"][2] == 5 and a["audio_routes"][2] == 5
-    # The unit going away makes it unavailable.
+    # (The unit going away is covered by the offline test below.)
     await hass.config_entries.async_unload(entry.entry_id)
     await sim.stop()
+
+
+async def test_status_entity_offline_keeps_layout(hass: HomeAssistant) -> None:
+    """Test status entity stays available as offline, keeping the layout and clearing what only the unit knows."""
+    sim = Sim()
+    entry = await setup(hass, sim)
+    await settle(hass, entry, 0.5)
+    before = state_of(hass, entry, "sensor", "status").attributes
+    assert before["presets"]["filled"] == [] or isinstance(before["presets"]["filled"], list)
+    # Power the unit off: the sensor says offline but keeps describing the unit.
+    await sim.stop()
+    await settle(hass, entry, 1.0)
+    state = state_of(hass, entry, "sensor", "status")
+    assert state.state == "offline"
+    a = state.attributes
+    assert set(a) >= MATRIX_KEYS and a["schema_version"] == 1
+    for key in ("name", "model", "inputs", "outputs", "features", "input_names", "audio_input_names", "output_names", "audio_output_names"):
+        assert a[key] == before[key]
+    assert a["presets"]["slots"] == before["presets"]["slots"]
+    assert a["presets"]["descriptions"] == before["presets"]["descriptions"]
+    # Only the unit knows these, so they are cleared.
+    assert a["video_routes"] == [None] * 16 and a["audio_routes"] == [None] * 16
+    assert a["mode"] is None and a["locked"] is None and a["presets"]["filled"] == []
+    # The other entities still go unavailable.
+    assert state_of(hass, entry, "select", "output_1").state == "unavailable"
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_status_entity_when_unit_is_off_at_start(hass: HomeAssistant) -> None:
+    """Test a unit that is off when Home Assistant starts still shows its layout."""
+    sim = Sim()
+    port = await sim.start()
+    await sim.stop()  # nothing is listening on the port now
+    entry = make_entry(port)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    state = state_of(hass, entry, "sensor", "status")
+    assert state.state == "offline"
+    a = state.attributes
+    assert (a["inputs"], a["outputs"]) == (16, 16) and a["model"] == "VS-162AV/RCA"
+    assert a["video_routes"] == [None] * 16
+    await hass.config_entries.async_unload(entry.entry_id)
 
 
 async def test_status_entity_on_single_output_model(hass: HomeAssistant) -> None:

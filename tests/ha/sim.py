@@ -6,7 +6,9 @@ import asyncio
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "custom_components" / "kramer"))
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2] / "custom_components" / "kramer")
+)
 import protocol as p  # noqa: E402
 
 
@@ -22,6 +24,7 @@ class Sim:
         identify: bool = True,
         audio: bool = True,
     ) -> None:
+        """Set up the object."""
         self.m = machine
         self.n = outputs
         self.video = dict.fromkeys(range(1, outputs + 1), 1)
@@ -39,23 +42,28 @@ class Sim:
         self.port = 0
 
     async def start(self) -> int:
+        """Start."""
         self.server = await asyncio.start_server(self.handle, "127.0.0.1", 0)
         self.port = self.server.sockets[0].getsockname()[1]
         return self.port
 
     async def stop(self) -> None:
+        """Stop."""
         for w in self.writers:
             w.close()
         if self.server:
             self.server.close()
 
     def pkt(self, i: int, a: int, b: int) -> bytes:
+        """Pkt."""
         return p.build_packet(i, a, b, self.m, True)
 
     def error(self, code: int) -> bytes:
+        """Error."""
         return self.pkt(16, 0, code)
 
     async def handle(self, r, w) -> None:
+        """Handle."""
         self.writers.append(w)
         buf = bytearray()
         while True:
@@ -66,12 +74,15 @@ class Sim:
             for k in p.parse_packets(buf):
                 if k.machine != self.m:
                     continue
-                self.log.append(p.build_packet(k.instruction, k.input, k.output, k.machine))
+                self.log.append(
+                    p.build_packet(k.instruction, k.input, k.output, k.machine)
+                )
                 for out in self.reply(k):
                     w.write(out)
                 await w.drain()
 
-    def reply(self, k: p.Packet) -> list[bytes]:
+    def reply(self, k: p.Packet) -> list[bytes]:  # noqa: C901
+        """Reply."""
         i = k.instruction
         if i == 1:
             if k.output == 0:
@@ -121,7 +132,9 @@ class Sim:
                 (4, 0): (1, 5),
             }
             if k.input == 1 and k.output in (10, 11, 12):
-                return [self.pkt(61, 65, 86)]  # the real unit answers prefix questions with "AV" too
+                return [
+                    self.pkt(61, 65, 86)
+                ]  # the real unit answers prefix questions with "AV" too
             if (k.input, k.output) in table:
                 return [self.pkt(61, *table[(k.input, k.output)])]
             return [self.error(0)]
@@ -133,10 +146,17 @@ class Sim:
             if i == 19 and k.output == 1:
                 return [self.error(2)]
             slot = self.slots.setdefault(
-                k.input, {"video": dict(self.video), "audio": dict(self.audio), "mode": self.mode}
+                k.input,
+                {
+                    "video": dict(self.video),
+                    "audio": dict(self.audio),
+                    "mode": self.mode,
+                },
             )
             if i == 3:
-                slot.update(video=dict(self.video), audio=dict(self.audio), mode=self.mode)
+                slot.update(
+                    video=dict(self.video), audio=dict(self.audio), mode=self.mode
+                )
             else:
                 slot["audio"] = dict(self.audio)
             return [self.pkt(i, k.input, 0)]
@@ -151,7 +171,9 @@ class Sim:
             out += [self.pkt(59, self.video[o], o) for o in sorted(self.video)]
             out += [self.pkt(60, self.audio[o], o) for o in sorted(self.audio)]
             out.append(self.pkt(59, 127, 1))
-            out.append(self.pkt(4, k.input, 0))  # even the audio recall is acknowledged as 4
+            out.append(
+                self.pkt(4, k.input, 0)
+            )  # even the audio recall is acknowledged as 4
             if i == 4 and slot["mode"] != self.mode:
                 self.mode = slot["mode"]
                 out.append(self.pkt(8, 0, self.mode))
@@ -174,7 +196,11 @@ class Sim:
         if delete:
             self.slots.pop(slot, None)
         else:
-            self.slots[slot] = {"video": dict(self.video), "audio": dict(self.audio), "mode": self.mode}
+            self.slots[slot] = {
+                "video": dict(self.video),
+                "audio": dict(self.audio),
+                "mode": self.mode,
+            }
         for w in self.writers:
             w.write(self.pkt(3, slot, 1 if delete else 0))
 

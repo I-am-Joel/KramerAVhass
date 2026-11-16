@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Kramer matrix switcher",
-        "description": "Enter the address of the serial-to-Ethernet bridge the switcher is plugged into.",
+        "description": "Configure for use with your connected device",
         "data": {
           "name": "Name",
           "ip_address": "IP address",
@@ -46,12 +46,12 @@
   "options": {
     "step": {
       "init": {
-        "title": "{name} configuration",
+        "title": "Configuration",
         "menu_options": {
           "names": "Input and output names",
           "presets": "Presets"
         },
-        "description": "{notes}"
+        "description": "**{name} configuration**\n\n{notes}"
       },
       "names": {
         "title": "Input and output names",
@@ -63,7 +63,7 @@
       },
       "presets": {
         "title": "Presets",
-        "description": "Every preset is listed. Occupied or Blank is read from the unit just now. A description after the dash is a HASS description (not stored on device).",
+        "description": "Every preset is listed. Filled or Empty is read from the unit just now. A description after the dash is a HASS description (not stored on device).",
         "data": {
           "preset": "Preset"
         }
@@ -81,7 +81,7 @@
       },
       "store": {
         "title": "Store a preset",
-        "description": "{warning}\n\nThis stores the present video routing, audio routing and mode (Audio follow video or Breakaway) together. A preset on the unit can be overwritten but never deleted.",
+        "description": "{warning}\n\nThis stores the present video routing, audio routing and mode (Audio follows video or Breakaway) together. A preset on the unit can be overwritten but never deleted.",
         "data": {
           "scope": "What to store",
           "confirm": "Yes, overwrite this preset"
@@ -89,7 +89,7 @@
       },
       "recall": {
         "title": "Recall a preset",
-        "description": "Recalling preset {preset} will change the routing now. {contents}\n\nA full recall also sets the mode (Audio follow video or Breakaway) that was stored with it.",
+        "description": "Recalling preset {preset} will change the routing now. {contents}\n\nA full recall also sets the mode (Audio follows video or Breakaway) that was stored with it.",
         "data": {
           "scope": "What to recall",
           "confirm": "Yes, recall this preset"
@@ -133,7 +133,7 @@
     },
     "abort": {
       "unit_unavailable": "The unit is not answering, so its presets cannot be shown. Try again when it is connected.",
-      "slot_blank": "Preset {preset} is blank, so there is nothing to recall.",
+      "slot_blank": "Preset {preset} is empty, so there is nothing to recall.",
       "preset_stored": "Stored the present setup in preset {preset}.",
       "preset_recalled": "Recalled preset {preset}."
     }
@@ -177,7 +177,7 @@
         "name": "Disconnected outputs"
       },
       "stored_presets": {
-        "name": "Stored presets (occupied only)"
+        "name": "Stored presets (filled only)"
       },
       "identity": {
         "name": "Unit identity"
@@ -211,7 +211,7 @@
     },
     "routing_mode": {
       "options": {
-        "afv": "Audio follow video",
+        "afv": "Audio follows video",
         "breakaway": "Breakaway"
       }
     }
@@ -237,7 +237,7 @@
     },
     "store_preset": {
       "name": "Store preset",
-      "description": "Store the present setup in a preset. Refuses an occupied preset unless overwriting is confirmed. A stored preset cannot be deleted, only overwritten.",
+      "description": "Store the present setup in a preset. Refuses a filled preset unless overwriting is confirmed. A stored preset cannot be deleted, only overwritten.",
       "fields": {
         "preset": {
           "name": "Preset",
@@ -249,7 +249,7 @@
         },
         "confirm_overwrite": {
           "name": "Confirm overwrite",
-          "description": "Must be true to overwrite an occupied preset."
+          "description": "Must be true to overwrite a filled preset."
         }
       }
     },
@@ -269,11 +269,11 @@
     },
     "set_routing_mode": {
       "name": "Set routing mode",
-      "description": "Choose Audio follow video or Breakaway. In Audio follow video every audio output follows its video input, and separate audio routes are lost.",
+      "description": "Choose Audio follows video or Breakaway. In Audio follows video every audio output follows its video input, and separate audio routes are lost.",
       "fields": {
         "mode": {
           "name": "Mode",
-          "description": "Audio follow video, or Breakaway (audio and video routed separately)."
+          "description": "Audio follows video, or Breakaway (audio and video routed separately)."
         }
       }
     }

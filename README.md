@@ -1,104 +1,77 @@
 # Kramer Matrix Switcher for Home Assistant
 
 Control and monitor a Kramer matrix switcher from Home Assistant, with
-two-way control: changes made on the unit's front panel appear in Home
-Assistant and changes made in Home Assistant are reflected at
+two-way status: changes made on the unit's front panel appear in Home
+Assistant straight away, and changes made in Home Assistant are read back from
 the unit.
 
 This is a fork of [krohrbaugh/kramer-homeassistant][original] by Kevin
 Rohrbaugh, and it would not exist without his work. See [Credits](#credits).
 
-> **Status:** early release (version 0.14.1). I have tested published features on three units (Kramer
-> VS-162AVRCA, VS-812 & VS-808YC), respectively connected through Brainboxes ES-247 and ES-246 serial-to-Ethernet
-> bridges. Other models and bridges are expected to work but are untested.
+> **Status:** early release. It has been tested on one unit (a Kramer
+> VS-162AVRCA, which is electrically the same as the VS-162AV apart from its
+> audio sockets) connected through a Brainboxes ES-257 serial-to-Ethernet
+> bridge. Other models and bridges are expected to work but are untested.
 
 ## What you get
 
-Depending on the features your switcher supports, the integration creates one device with one, some or all of:
+For each switcher you add, the integration creates one device with:
 
 | Entity | Type | What it does |
 | -- | -- | -- |
-| Device name (for example "Studio 1 - VS-812") | `media_player` | Choose one input for **all** outputs. Shows **Mixed** when the outputs are not all set to the same input, and **Off** when all are disconnected. |
-| All outputs | `select` | The same as the media player, exposed as a simple input list drop-down that sends to all outputs at once. |
-| Output 001 Video, Output 002 Video ... | `select` | One per audio and one per video output. Choose which input feeds that output, or **Off** to turn the output off. |
-| Mode | `select` | **Audio follows video** or **Breakaway**. |
+| Device name (for example "Dining Room Kramer") | `media_player` | Choose one input for **all** outputs. Shows **Mixed** when the outputs are not all on the same input, and **Off** when all are disconnected. |
+| All outputs | `select` | The same as the media player, as a simple drop-down. |
+| Output 01, Output 02 ... | `select` | One per output. Choose which input feeds that output, or **Off** to disconnect it. |
+| Mode | `select` | **Audio follow video** or **Breakaway** (see [Limitations](#limitations)). |
 | Front panel lock | `switch` | Locks or unlocks the buttons on the unit. |
-| Status | `sensor` | One diagnostic sensor per unit that holds the whole picture of the unit (see [The Status sensor](#the-status-sensor)). |
-| Custom refresh | `switch` | Turns on a refresh interval of your own (see below). Found in the device's **Controls**. |
-| Refresh interval | `number` | How often, in seconds (5 to 1800), the integration re-reads the unit's full state. Only available while **Custom refresh** is on. |
-| In step | `binary_sensor` | One per output, on models with separate audio. On while that output's audio and video come from the same input. |
-| Read only sensors | `sensor`, `binary_sensor` | Numerous sensors are exposed. Depending on what can be read from the unit, these can include firmware version, routing summary, total number of stored presets and connection status. |
+| Status | `sensor` (diagnostic) | Everything about the unit in one place, for dashboard cards and automations. Its state is `online` or `offline` (see [When the unit is powered off](#when-the-unit-is-powered-off)). |
 
-All of these update in HASS and on the device front panel, where available. Default naming of inputs and outputs are
-"Input 001 Audio", "Input 002 Video" etc and "Output 001 Audio", "Output 002 Video" etc, until you rename them.
+All of these update when someone uses the front panel. Inputs are named
+"Input 01" and so on, and outputs "Output 01" and so on, until you rename them.
 
 ## How it connects
 
-The integration uses Kramer's [Protocol 2000][p2000] over a single TCP
-connection. It was built to connect via a switcher's serial (RS-232) port, using
+The integration talks Kramer's [Protocol 2000][p2000] over a single TCP
+connection. It is built for switchers with only a serial (RS-232) port, using
 a serial-to-Ethernet bridge that is set to a plain ("raw") TCP socket.
-Switchers with an Ethernet port that use Protocol 2000 over TCP should
-also work, but I've not tested this. These instructions assume serial (RS-232) connection via an Ethernet <> serial bridge.
+Switchers with their own Ethernet port that speak Protocol 2000 over TCP should
+also work, but this has not been tested.
 
 ```
-Home Assistant ---- network ---- ethernet-serial bridge ---- RS-232 ---- Kramer
+Home Assistant ---- network ---- serial-to-Ethernet bridge ---- RS-232 ---- Kramer
 ```
 
 The integration:
 
-- keeps a connection open for each device and reconnects by itself if the bridge or the
+- keeps one connection open and reconnects by itself if the bridge or the
   switcher loses power or the network drops (tested);
-- asks the switcher for its full state when it connects, acts on messages the unit sends as it changes and re-reads full state, defaulted to once per minute;
-- marks entities as unavailable when it cannot reach the unit, automatically restoring them when it can.
+- asks the switcher for its full state when it connects and then once a
+  minute, and acts on messages the unit sends as it changes;
+- marks the entities as unavailable while it cannot reach the unit. The Status
+  sensor is the exception: it reads `offline` and keeps describing the unit (see
+  below).
 
 **Only one program should be connected to the bridge's TCP port at a time.**
-Some bridges pass serial data to every connected client but older firmware may
+Some bridges pass serial data to every connected client, and older firmware may
 drop connections when two clients are attached. Do not leave a second tool
 (for example `nc` or another Home Assistant integration) connected to the same
-port as this Kramer AV integration.
-
-## The Status sensor
-
-Each unit has one **Status** sensor (a diagnostic entity, with an entity ID ending `_status`) that holds the whole state of the unit in one place. It is designed for dashboard cards and automations. Its state is `online` while the unit is answering, and it is unavailable otherwise. Everything else is in its attributes:
-
-| Attribute | Meaning |
-| -- | -- |
-| `schema_version` | Version of this attribute layout (see below). |
-| `name`, `model` | The name you gave the device and the model name. |
-| `inputs`, `outputs` | Number of inputs and outputs. |
-| `features` | What the model supports: `modes`, `audio`, `off`, `lock` (each true or false) and `presets` (the number of presets, 0 if none). |
-| `mode` | `afv` or `breakaway`, or empty on models without modes. |
-| `input_names`, `audio_input_names` | Video (or only) and audio input names, in order. The audio list is empty on models without separate audio. |
-| `output_names`, `audio_output_names` | Video (or only) and audio output names, in order. The audio list is empty on models without separate audio. |
-| `video_routes`, `audio_routes` | For each output in order, the number of the input feeding it (0 means off). |
-| `presets` | `slots` (how many), `filled` (the preset numbers in use) and `descriptions` (your HASS descriptions). |
-| `firmware` | Firmware version, where the unit reports it. |
-| `last_error` | The latest error message and the time it happened. |
-| `locked` | Whether the front panel is locked, where the model supports it. |
-
-The attributes are not stored in Home Assistant's history, so routing changes do not make the database grow. Only the sensor's state is recorded.
-
-**Stable layout.** Attributes may be added in future versions, but existing ones are never renamed, removed or changed in type. A change that breaks this would raise `schema_version`, so anything you build on this sensor can check that number first.
-
-## Requirements
-
-Home Assistant 2025.1 or later.
+port.
 
 ## Before you install
 
-1. Confirm that your Kramer switcher uses **Protocol 2000** and find its
+1. Check in your switcher's manual that it uses **Protocol 2000** and find its
    serial settings. Kramer units normally use 9600 baud, 8 data bits, no
    parity, 1 stop bit.
-2. Set up your ethernet-to-serial bridge with matching serial settings, in raw TCP
-   server mode, and give it a unique, fixed IP address. Note the TCP port it listens on.
-3. Check the cable and any null-modem setting. On the VS-162AV, for instance, a DIP switch on the rear defines whether a null-modem adapter is
-   required or a straight-through cable will work. On other models this cannot be defined and you must either use a null-modem cable or a null-modem adaptor with a straight-through cable. If the unit stays silent, this is the first thing to check.
-4. Check and set the unit's **machine number**. A single unit is normally number 1. This is usually defined using dip switches. Daisy-chained units will each require a different number (see limitations, below).
-5. If HASS or a computer on your network cannot see your bridge, try keeping HASS/your computer and the bridge on a network path that does not block or
-   isolate the devices from one another. This might be a software configuration on your router or something else. During testing I found TP-Link routers blocked the Brainboxes bridges, even though they could be found with a direct network connection from another device. Using a network path that didn't rely on those routers (such as unmanaged network switches) resolved this.
-6. This integration is designed to keep its connection with an ethernet>serial bridge open at all times. If you need to change a bridge's settings, disable the integration entry in HASS first, as this will ensure there's no conflict with the integration.
+2. Set up your serial-to-Ethernet bridge with those serial settings, in raw TCP
+   server mode, and give it a fixed IP address. Note the TCP port it listens on.
+3. Check the cable and any null-modem setting. On the VS-162AV and
+   VS-162AVRCA, a DIP switch on the rear selects whether a null-modem adapter is
+   needed. If the unit stays silent, this is the first thing to check.
+4. Check the unit's **machine number**. A single unit is normally number 1.
+5. Keep Home Assistant and the bridge on a network path that does not block or
+   isolate devices from each other.
 
-## Installation (choose either the HACS or manual method, then proceed to the setup stage)
+## Installation
 
 ### HACS (custom repository)
 
@@ -116,127 +89,83 @@ Copy the `custom_components/kramer` folder from this repository into the
 
 1. Go to **Settings > Devices & services > Add integration** and choose
    **Kramer Matrix Switcher**.
-2. Enter a name, the IP address and port of your bridge, the machine number (defaults to 1) and select the model.
-3. If your model is not listed, choose **Other** and enter its model name, the number of inputs
-   and outputs it supports, whether it also supports separate audio and video switching and the number of presets available (if any). You can choose any size of switcher or matrix, up to 127x127 (the maximum supported by Protocol 2000).
+2. Enter a name, the IP address and port of your bridge, the machine number and
+   the model.
+3. If your model is not listed, choose **Other** and enter its number of inputs
+   and outputs, and whether it supports separate audio and video switching.
+   You can choose any size up to 64 by 64.
 4. Home Assistant tests the connection before saving. If it fails, you will be
    told whether it could not connect at all or connected but got no answer from
    the switcher.
 
 ### Changing settings later
 
-- **Reconfigure** (three-dot menu on the integration): change available options relevant to your device, including name, address, port, machine number, model and number of supported presets.
-- **Configure** (on the integration):
-  Rename audio and video inputs and audio and video outputs, one name
+- **Reconfigure** (three-dot menu on the integration): change the name, address,
+  port, machine number or model.
+- **Configure** (on the integration): rename the inputs and outputs, one name
   per line. Leave a line blank to keep the default. The names "Off" and "Mixed"
-  are reserved and all names must be unique.
+  are reserved, and input names must all be different.
 
-  Set up, store and recall presets (for models that support this). Support varies between models. You can store and recall presets but cannot delete a preset's configuration. Instead you can clear its name to indicate a preset number is free to be overwritten and you can store a new configuration over the top of an existing preset. The integration identifies and displays preset slots that are occupied or empty.
+## When the unit is powered off
 
-## Actions
+When the integration cannot reach a unit (it is switched off, or the bridge or
+network is down), most entities become `unavailable`. The **Status** sensor does
+not. It stays available and its state changes from `online` to `offline`, so a
+dashboard card can still draw the unit and a card can be added to a dashboard
+while the unit is off.
 
-Actions are called from scripts, automations, dashboard buttons or Developer tools → Actions. Each one targets a Kramer device (choose the switcher as the target).
+While the unit is `offline` the Status sensor:
 
-Inputs and outputs can be given by number or by name (names are the ones set under Configure → Input and output names, and are not case sensitive). An input can be given by its video or audio name. An output can be given by its video name, its audio name or its shared name (for example "Output 001", which covers "Output 001 Video" and "Output 001 Audio").
+- **keeps** what comes from this integration's own setup: the model, the number
+  of inputs and outputs, the features, the input and output names, the number of
+  preset slots, the preset descriptions, and the last error;
+- **clears** what only the unit knows: every route in `video_routes` and
+  `audio_routes` becomes `null`, `mode` and `locked` become `null`, and
+  `presets.filled` becomes an empty list. They are filled in again from the unit
+  as soon as it answers, and the state returns to `online`.
 
-### `kramer.set_route`
+**Effect on automations.** An automation that triggers on any change to the
+Status sensor's routing attributes will run when they clear as the unit powers
+off, and again when they refill as it powers on. Use a condition on the sensor's
+state (`online`) if the automation should only act while the unit is answering.
+A unit that is *disabled* in the integration has no Status sensor at all.
 
-Sends one input to one or more outputs.
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `input` | yes | Input number or name. `Off` (or `0`) disconnects the output, on models that can. |
-| `outputs` | yes | One or more output numbers or names, or `all`. |
-| `layer` | no | `both` (the default), `video` or `audio`. On models with separate audio, `video` or `audio` changes only that layer. Changing `audio` on its own needs the unit to be in Breakaway mode. |
-
-```yaml
-action: kramer.set_route
-target:
-  device_id: <your Kramer device>
-data:
-  input: "Input 003"
-  outputs:
-    - "Output 001"
-    - "2"
-```
-
-All names and numbers are checked before anything is sent. If a command fails part-way, the error lists the outputs already switched.
-
-### `kramer.set_routing_mode`
-
-Sets the unit's routing mode, as the **Mode** select does.
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `mode` | yes | `afv` (audio follow video) or `breakaway` (audio and video routed separately). |
-
-```yaml
-action: kramer.set_routing_mode
-target:
-  device_id: <your Kramer device>
-data:
-  mode: breakaway
-```
-
-Models without routing modes (for example the VS-812) refuse this action with an error, and nothing is sent to the unit.
-
-### `kramer.store_preset`
-
-Stores the present setup (video routing, audio routing and mode) in a preset on the unit. Only on models with presets.
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `preset` | yes | Preset number, or its HASS description. |
-| `audio_only` | no | `true` stores only the audio routes (models with separate audio). Default `false`. |
-| `confirm_overwrite` | no | Must be `true` to overwrite an occupied preset. Default `false`. |
-
-An occupied preset is refused unless `confirm_overwrite: true` is set. Presets on the unit can be overwritten but cannot be deleted.
-
-### `kramer.recall_preset`
-
-Recalls a stored setup. A full recall also sets the mode that was stored with it. A blank preset is refused.
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `preset` | yes | Preset number, or its HASS description. |
-| `audio_only` | no | `true` recalls only the audio routes (models with separate audio). Default `false`. |
-
-### Notes
-
-- Descriptions are only held in Home Assistant, set under Configure → Presets. They are not stored on the unit.
-- Preset numbers match those called via the unit's front panel (eg VS-162AV/RCA: 1 to 60).
-
-
-
-## Tested models and features
+## Supported models
 
 | Model | Notes |
 | -- | -- |
-| VS-162AV / VS-162AVRCA | 16 x 16 matrix switching, audio-follow-video and breakaway, 60 presets, panel lock (see limitations). Tested on the RCA version. |
-| VS-812 | 8 x 1 input switching. |
-| VS-808YC | 8 x 8 matrix switching, AFV, breakaway, 16 presets, panel lock |
+| VS-162AV / VS-162AVRCA | 16 x 16, audio-follow-video and breakaway. Tested on the RCA version. |
+| Other | Enter the number of inputs and outputs yourself. |
 
 More models can be added to `custom_components/kramer/models.py`.
 
-## Limitations (not all features apply to all models)
+## Limitations
 
+- **Mode.** The unit reports only whether it is in audio-follow-video or
+  breakaway mode. It does not report whether VIDEO or AUDIO is selected on the
+  front panel, and it did not accept a command to select AUDIO. In Breakaway
+  mode, route commands from Home Assistant change **video only**; audio keeps
+  following whatever it was last set to. Changing the audio separately is not
+  yet supported.
+- **Size is not read from the unit.** The VS-162AV does not report its own
+  number of inputs and outputs, so the model (or your "Other" entry) decides.
+- **Front-panel lock.** The lock works, but the unit shows no indicator on its
+  display.
 - **One unit per entry.** Add the integration once per switcher. Daisy-chained
-  units on one connection are not tested or supported by this integration. It might work, I don't know.
-- **Presets.** It is not possible to delete a preset, once added. You *can* overwrite them.
-- **Unannounced configuration changes** Some settings changed through a unit's on-screen menu - rather than via a dedicated panel button - are not announced by some models. An example I've discovered is that changing the front panel lock on the VS-162AV/RCA - via its menu driven control - is not announced, but changing the front panel lock on the VS-808YC - via its dedicated "panel lock" button - *is* announced. This integration refreshes all unit's states every 60 seconds, regardless, so an unannounced change will still appear in Home Assistant, but that could take up to 60 seconds. Changes made via the integration in Home Assistant are not affected by this limitation and the unit responds to such changes immediately. If this matters to you, the refresh interval can be adjusted in the device's options, at the cost of extra network traffic.
+  units using different machine numbers on one connection are not yet handled
+  as a group.
 
-## Planned if possible
+## Planned
 
-- Additional protocol variant to enable control of Kramer presentation scalers (hopefully soon).
-- A dedicated matrix dashboard card that mimics the layout and function of the physical unit (hopefully soon).
-- Supporting multiple daisy-chained units on a single connection (may not be worthwhile and/or possible).
-- More flexible ways to configure unknown models for use in the integration (hopefully soon).
-- A model-definition wizard so users can contribute model profiles to the project through GitHub (for the future).
-- More models predefined, if I can access and test them.
+- Separate audio routing in Breakaway mode.
+- Storing and recalling the unit's presets.
+- Daisy-chained units on one connection.
+- More models, and an easier way to describe an unlisted model.
 
 ## Troubleshooting
 
-To see everything the integration sends and receives, run this in **Tools (previously Developer tools) > Actions** (YAML mode):
+To see everything the integration sends and receives, run this in **Developer
+tools > Actions** (YAML mode):
 
 ```yaml
 action: logger.set_level
@@ -245,32 +174,32 @@ data:
 ```
 
 Use `warning` in place of `debug` to turn it off. The setting lasts until Home
-Assistant restarts. The log shows each connected unit's four-byte messages in hex.
+Assistant restarts. The log shows each four-byte message in hex.
 
 | Symptom | Likely cause |
 | -- | -- |
 | "Could not connect" during setup | Wrong IP or port, or the bridge is not in raw TCP server mode. |
-| "Connected, but the switcher did not answer" | Serial settings, cable or null-modem setting or adaptor, or wrong machine number. Check configuration options in the product manual and that dip switches on the unit match your required configuration. On some models the up/down and switch numbers aren't clear. EG VS-812 has switches on the underside with 1 to 4 running from right to left of the unit, as viewed from the front and with "on" being towards the back panel<img width="1200" height="800" alt="Kramer vs-812 underside" src="https://github.com/user-attachments/assets/1a19251d-acca-45bc-bcf6-f86c340d9d69" />Image shows underside of Kramer VS-812 with switch 1 in the "on" position. |
-| Entities unavailable | Bridge or switcher is off, or the network is down or disconnected. The integration should recover by itself after the underlying issue is resolved. |
-| Connection resets when two or more applications are communicating with the bridge | In testing with a Brainboxes ES-246, reliable operation was confirmed with one application (eg this integration) using the bridge's port and became unreliable with two (eg this integration and ssh). Different bridges or firmware versions may support this better. |
-| Serial link not working | It's worth testing the link between your HASS host and the unit, bypassing the integration, to narrow down the cause. Disable the Kramer entry for that unit, then run the command: `(printf '\x05\x80\x81\x81'; sleep 3) \| nc -w 5 IPADDRESS PORT \| od -An -tx1` from a terminal in Home Assistant (replace IPADDRESS and PORT). A working link prints one line of four numbers starting 45. No output means the bridge is reachable but the unit isn't answering: check the serial cable (a null-modem adapter is needed on some models), the bridge's serial settings (9600, 8 data bits, no parity, 1 stop bit, no flow control) and the machine number dip switches on the unit. If it outputs an error such as "Connection refused" or "timed out", instead of numbers, Home Assistant can't reach the bridge at all. In which case, check the bridge is powered and on the network, its IP address and port are correctly configured, that it is set to Raw TCP, and that nothing else is connected to it. Don't forget to re-enable the integration entry, when you're done. |
+| "Connected, but the switcher did not answer" | Serial settings, cable or null-modem setting, or wrong machine number. |
+| Entities unavailable (the Status sensor reads `offline`) | Bridge or switcher is off, or the network is down. They recover by themselves. |
+| Connection resets with two programs attached | Only one client should use the bridge's port. |
 
 ## Credits
 
 This project is a fork of **[kramer-homeassistant][original] by Kevin Rohrbaugh
 ([@krohrbaugh][author])**, released under the MIT licence. Kevin wrote the
 original integration, including the Home Assistant setup, the release and
-checking workflows and the HACS packaging that this fork still uses. He
-kindly agreed to this fork being developed.
+checking workflows and the HACS packaging that this fork still uses, and
+kindly agreed to this fork being developed. His original integration is the
+right choice for Kramer switches with a network port that only need to be
+controlled, not monitored.
 
 This fork replaces the way the integration talks to the switcher with a new
 connection layer written for this project, and adds the entities, setup and
-reconfiguration described above. The original relied on the `kessler-av` library;
-this version does not.
+reconfiguration described above. The original used the `kessler-av` library;
+this version does not depend on it.
 
-The revised code was written with Claude.
-
-This integration was not written by, or with the endorsement or support of, Kramer AV.
+The code was written with the help of Claude (an AI assistant made by
+Anthropic) and tested by the maintainer on real hardware.
 
 ## Licence
 

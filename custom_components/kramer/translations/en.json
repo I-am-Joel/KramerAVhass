@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Kramer matrix switcher",
+        "title": "Kramer switcher or scaler",
         "description": "Configure for use with your connected device",
         "data": {
           "name": "Name",
@@ -12,8 +12,15 @@
           "model": "Model"
         }
       },
+      "vp729": {
+        "title": "VP-729 connection",
+        "description": "The VP-729 is controlled over its Ethernet port. The factory port is 5000. In the unit's network module, \"Password Required\" on that port must be set to No.",
+        "data": {
+          "port": "Port"
+        }
+      },
       "reconfigure": {
-        "title": "Reconfigure Kramer matrix switcher",
+        "title": "Reconfigure Kramer unit",
         "data": {
           "name": "Name",
           "ip_address": "IP address",
@@ -36,11 +43,14 @@
     },
     "error": {
       "cannot_connect": "Could not connect. Check the IP address and port.",
-      "no_reply": "Connected, but the switcher did not answer. Check the cable, the machine number and the bridge's serial settings."
+      "no_reply": "Connected, but the switcher did not answer. Check the cable, the machine number and the bridge's serial settings. If this unit is a VP-729, choose that model instead.",
+      "no_reply_vp729": "Connected, but nothing answered like a VP-729. Check that this is the VP-729's Ethernet port (5000 unless changed), that no password is required on that port, and that the model chosen is right.",
+      "type_change": "A VP-729 and a matrix switcher cannot be swapped by reconfiguring. Add the unit again as a new entry with the right model instead."
     },
     "abort": {
       "already_configured": "This switcher is already set up.",
-      "reconfigure_successful": "Settings updated."
+      "reconfigure_successful": "Settings updated.",
+      "no_options": "A VP-729 has no names or presets to configure here. Use its Custom refresh switch and Refresh interval number to change how often it is read, and Reconfigure to change its address."
     }
   },
   "options": {

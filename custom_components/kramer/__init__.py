@@ -30,15 +30,23 @@ from .const import (
     DEFAULT_MACHINE,
     DEFAULT_PORT,
     DEFAULT_REFRESH,
+    DEFAULT_VP729_PORT,
     DOMAIN,
     MAX_REFRESH,
     MIN_REFRESH,
 )
-from .entity import KramerConfigEntry, KramerData
-from .models import resolve_model_name, resolve_preset_slots, resolve_supports_lock, resolve_supports_off
+from .entity import KramerConfigEntry, KramerData, Vp729Data
+from .models import (
+    is_vp729,
+    resolve_model_name,
+    resolve_preset_slots,
+    resolve_supports_lock,
+    resolve_supports_off,
+)
 from .presets import parse_descriptions
 from .protocol import KramerClient
 from .services import async_register_services
+from .vp729_protocol import Vp729Client
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +55,15 @@ CONFIG_SCHEMA: vol.Schema = cv.config_entry_only_config_schema(DOMAIN)
 PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.MEDIA_PLAYER,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
+
+VP729_PLATFORMS = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
@@ -115,6 +132,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
     """Set up a unit from a config entry."""
     data = entry.data
+    if is_vp729(data):
+        return await _setup_vp729(hass, entry)
     try:
         inputs = int(data[CONF_INPUTS])
         outputs = int(data[CONF_OUTPUTS])
@@ -186,6 +205,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
     return True
 
 
+async def _setup_vp729(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
+    """Set up a VP-729 presentation scaler/switcher."""
+    data = entry.data
+    custom_refresh, refresh_seconds = refresh_settings(entry.options)
+    client = Vp729Client(
+        data[CONF_HOST],
+        int(data.get(CONF_PORT, DEFAULT_VP729_PORT)),
+        refresh_interval=effective_refresh(custom_refresh, refresh_seconds),
+    )
+    entry.runtime_data = Vp729Data(
+        client=client,
+        model_name=resolve_model_name(data),
+        custom_refresh=custom_refresh,
+        refresh_seconds=refresh_seconds,
+        applied_options=_without_refresh(entry.options),
+    )
+    await client.async_start()
+    # The first read of a unit takes a few seconds, so wait a little longer than for a matrix.
+    if not await client.async_wait_ready(20):
+        _LOGGER.warning("VP-729 at %s is not answering yet; will keep trying", data[CONF_HOST])
+
+    await hass.config_entries.async_forward_entry_setups(entry, VP729_PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_reload))
+    return True
+
+
 def _without_refresh(options: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in options.items() if k not in REFRESH_KEYS}
 
@@ -199,7 +244,8 @@ async def _reload(hass: HomeAssistant, entry: KramerConfigEntry) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
     """Unload an entry."""
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    platforms = VP729_PLATFORMS if is_vp729(entry.data) else PLATFORMS
+    unloaded = await hass.config_entries.async_unload_platforms(entry, platforms)
     if unloaded:
         await entry.runtime_data.client.async_stop()
     return unloaded

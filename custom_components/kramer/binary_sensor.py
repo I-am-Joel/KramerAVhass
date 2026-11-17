@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import KramerConfigEntry, KramerEntity, audio_input_to_name, base_output_name, input_to_name, link_icon
+from .entity import (
+    KramerConfigEntry,
+    KramerEntity,
+    Vp729Data,
+    audio_input_to_name,
+    base_output_name,
+    input_to_name,
+    link_icon,
+)
 from .protocol import MODE_AFV
 
 
@@ -17,7 +28,7 @@ async def async_setup_entry(
     """Set up the connection sensor, and an In step sensor per output on models with separate audio."""
     data = entry.runtime_data
     entities: list[KramerEntity] = [KramerConnectionSensor(entry)]
-    if data.has_audio:
+    if not isinstance(data, Vp729Data) and data.has_audio:
         entities += [KramerInStepSensor(entry, number, name) for number, name in enumerate(data.output_names, start=1)]
     async_add_entities(entities)
 

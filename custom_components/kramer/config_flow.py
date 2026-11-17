@@ -49,12 +49,24 @@ from .const import (
     CONF_PRESET_SLOTS,
     DEFAULT_MACHINE,
     DEFAULT_PORT,
+    DEFAULT_VP729_PORT,
     DOMAIN,
     SOURCE_MIXED,
     SOURCE_OFF,
 )
 from .entity import KramerData
-from .models import MAX_PORTS, MAX_PRESET_SLOTS, MODELS, OTHER, resolve_model_key, resolve_notes, resolve_preset_slots
+from .models import (
+    MAX_PORTS,
+    MAX_PRESET_SLOTS,
+    MODELS,
+    OTHER,
+    VP729_KEY,
+    VP729_NAME,
+    is_vp729,
+    resolve_model_key,
+    resolve_notes,
+    resolve_preset_slots,
+)
 from .presets import (
     parse_descriptions,
     serialise_descriptions,
@@ -62,7 +74,13 @@ from .presets import (
     summarise_routes,
     validate_description,
 )
-from .protocol import KramerConnectionError, KramerError, KramerTimeoutError, async_probe
+from .protocol import (
+    KramerConnectionError,
+    KramerError,
+    KramerTimeoutError,
+    async_probe,
+)
+from .vp729_protocol import async_probe_vp729
 
 CONF_NAME = "name"
 
@@ -73,7 +91,8 @@ def _number(minimum: int, maximum: int) -> NumberSelector:
 
 def _model_selector() -> SelectSelector:
     options = [{"value": k, "label": m.name} for k, m in MODELS.items()]
-    options.append({"value": OTHER, "label": "Other (configure yourself on the next page)"})
+    options.append({"value": VP729_KEY, "label": "VP-729 presentation scaler/switcher (Ethernet)"})
+    options.append({"value": OTHER, "label": "Other (Protocol 2000 switchers only)"})
     return SelectSelector(SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN))
 
 
@@ -98,29 +117,37 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _finish(self, errors: dict[str, str]) -> ConfigFlowResult | None:
         """Test the connection and save. Returns None if there were errors."""
         data = self._data
-        host, port, machine = data[CONF_HOST], data[CONF_PORT], data[CONF_MACHINE]
+        vp729 = is_vp729(data)
+        host, port = data[CONF_HOST], data[CONF_PORT]
+        machine = data.get(CONF_MACHINE, DEFAULT_MACHINE)
         skip_probe = False
         if self.source == "reconfigure":
             old = self._get_reconfigure_entry().data
             skip_probe = (
                 old.get(CONF_HOST) == host
                 and int(old.get(CONF_PORT, 0)) == port
-                and int(old.get(CONF_MACHINE, 0)) == machine
+                and (vp729 or int(old.get(CONF_MACHINE, 0)) == machine)
             )
         if not skip_probe:
             try:
-                await async_probe(host, port, machine)
+                if vp729:
+                    await async_probe_vp729(host, port)
+                else:
+                    await async_probe(host, port, machine)
             except KramerTimeoutError:
-                errors["base"] = "no_reply"
+                errors["base"] = "no_reply_vp729" if vp729 else "no_reply"
                 return None
             except KramerConnectionError:
                 errors["base"] = "cannot_connect"
+                return None
+            except KramerError:
+                errors["base"] = "no_reply_vp729" if vp729 else "no_reply"
                 return None
 
         title = data.pop(CONF_NAME)
         if self.source == "reconfigure":
             return self.async_update_reload_and_abort(self._get_reconfigure_entry(), title=title, data=data)
-        await self.async_set_unique_id(f"{host}:{port}:{machine}")
+        await self.async_set_unique_id(f"{host}:{port}:vp729" if vp729 else f"{host}:{port}:{machine}")
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title=title, data=data)
 
@@ -139,6 +166,12 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_MACHINE: int(user_input[CONF_MACHINE]),
             }
             model = user_input[CONF_MODEL]
+            if self.source == "reconfigure" and (model == VP729_KEY) != is_vp729(self._get_reconfigure_entry().data):
+                # A VP-729 and a matrix switcher are different kinds of unit: add a new entry instead.
+                errors["base"] = "type_change"
+                return self._user_form({**cur, **user_input}, errors)
+            if model == VP729_KEY:
+                return await self.async_step_vp729()
             if model == OTHER:
                 if previous.get(CONF_MODEL) == OTHER:  # back from a failed test: keep the second screen's values
                     for key in (CONF_MODEL_NAME, CONF_INPUTS, CONF_OUTPUTS, CONF_MODES, CONF_PRESET_SLOTS):
@@ -173,7 +206,7 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_MODEL,
                     default=resolve_model_key(cur.get(CONF_MODEL))
-                    or (OTHER if cur.get(CONF_MODEL) == OTHER else next(iter(MODELS))),
+                    or (cur[CONF_MODEL] if cur.get(CONF_MODEL) in (OTHER, VP729_KEY) else next(iter(MODELS))),
                 ): _model_selector(),
             }
         )
@@ -183,6 +216,28 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show the setup screens, pre-filled."""
         return await self.async_step_user(user_input)
+
+    async def async_step_vp729(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Second screen for a VP-729: its Ethernet port (5000 unless changed on the unit's network module)."""
+        errors: dict[str, str] = {}
+        cur = self._current()
+        was_vp729 = cur.get(CONF_MODEL) == VP729_KEY
+        if user_input is not None:
+            self._data.update(
+                {
+                    CONF_MODEL: VP729_KEY,
+                    CONF_MODEL_NAME: VP729_NAME,
+                    CONF_PORT: int(user_input[CONF_PORT]),
+                }
+            )
+            self._data.pop(CONF_MACHINE, None)
+            if (result := await self._finish(errors)) is not None:
+                return result
+            return self._user_form({**self._current(), CONF_MODEL: VP729_KEY}, errors)
+
+        port = int(cur[CONF_PORT]) if was_vp729 and CONF_PORT in cur else DEFAULT_VP729_PORT
+        schema = vol.Schema({vol.Required(CONF_PORT, default=port): _number(1, 65535)})
+        return self.async_show_form(step_id="vp729", data_schema=schema, errors=errors)
 
     async def async_step_other(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Second screen for models not in the library."""
@@ -289,6 +344,8 @@ class KramerOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show the device name and notes, then choose between names and presets."""
+        if is_vp729(self.config_entry.data):
+            return self.async_abort(reason="no_options")
         notes = resolve_notes(self.config_entry.data)
         has_presets = resolve_preset_slots(self.config_entry.data) > 0
         return self.async_show_menu(

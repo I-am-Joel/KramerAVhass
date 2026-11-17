@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from typing import Any
 
 OTHER = "other"
+VP729_KEY = "vp-729"  # the VP-729 presentation scaler/switcher (not a matrix, so not in MODELS)
+VP729_NAME = "VP-729"
 MAX_PORTS = 127
 MAX_PRESET_SLOTS = 99
 
@@ -65,6 +67,11 @@ def resolve_model_key(key: str | None) -> str | None:
     """Return the current library key for a saved key, or None if unknown."""
     key = LEGACY_KEYS.get(key or "", key)
     return key if key in MODELS else None
+
+
+def is_vp729(data: Mapping[str, Any]) -> bool:
+    """Return whether a config entry's data describes a VP-729."""
+    return data.get("model") == VP729_KEY
 
 
 def resolve_model_name(data: Mapping[str, Any]) -> str:

@@ -11,8 +11,18 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import SOURCE_MIXED
-from .entity import KramerConfigEntry, KramerEntity, audio_input_to_name, base_output_name, input_to_name
+from .entity import (
+    KramerConfigEntry,
+    KramerEntity,
+    Vp729Data,
+    audio_input_to_name,
+    base_output_name,
+    input_to_name,
+)
 from .protocol import MODE_AFV, MODE_BREAKAWAY
+from .vp729_defs import KIND_SENSOR
+from .vp729_entity import Vp729StatusSensor
+from .vp729_entity import build as vp729_build
 
 
 async def async_setup_entry(
@@ -20,6 +30,16 @@ async def async_setup_entry(
 ) -> None:
     """Set up the sensors that make sense for this model."""
     data = entry.runtime_data
+    if isinstance(data, Vp729Data):
+        async_add_entities(
+            [
+                Vp729StatusSensor(entry),
+                KramerLastReplySensor(entry),
+                KramerLastErrorSensor(entry),
+                *vp729_build(entry, KIND_SENSOR),
+            ]
+        )
+        return
     client = data.client
     entities: list[KramerEntity] = [
         KramerStatusSensor(entry),

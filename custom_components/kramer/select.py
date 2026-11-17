@@ -11,6 +11,7 @@ from .const import SOURCE_MIXED
 from .entity import (
     KramerConfigEntry,
     KramerEntity,
+    Vp729Data,
     audio_input_to_name,
     audio_name_to_input,
     audio_source_options,
@@ -23,6 +24,8 @@ from .entity import (
     source_options_with_mixed,
 )
 from .protocol import MODE_AFV, MODE_BREAKAWAY
+from .vp729_defs import KIND_SELECT
+from .vp729_entity import build as vp729_build
 
 MODE_LABELS = {
     MODE_AFV: "Audio follows video",
@@ -35,6 +38,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up the selects."""
     data = entry.runtime_data
+    if isinstance(data, Vp729Data):
+        async_add_entities(vp729_build(entry, KIND_SELECT))
+        return
     entities: list[SelectEntity] = []
     if len(data.output_names) > 1:
         entities.append(KramerAllOutputs(entry))

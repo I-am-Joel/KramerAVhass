@@ -11,8 +11,16 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
-from .const import CONF_CUSTOM_REFRESH, CONF_REFRESH_SECONDS, DEFAULT_REFRESH, DOMAIN, SOURCE_MIXED, SOURCE_OFF
+from .const import (
+    CONF_CUSTOM_REFRESH,
+    CONF_REFRESH_SECONDS,
+    DEFAULT_REFRESH,
+    DOMAIN,
+    SOURCE_MIXED,
+    SOURCE_OFF,
+)
 from .protocol import KramerClient, KramerError
+from .vp729_protocol import Vp729Client
 
 
 @dataclass
@@ -45,7 +53,23 @@ class KramerData:
         return self.supports_modes and self.client.audio_supported is not False
 
 
-type KramerConfigEntry = ConfigEntry[KramerData]
+@dataclass
+class Vp729Data:
+    """Everything the platforms need for a VP-729, stored on the config entry.
+
+    The refresh settings and the client's availability, listener and last-error
+    members match KramerData, so the shared refresh-interval entities, the
+    connection sensor and the diagnostic sensors work for both kinds of unit.
+    """
+
+    client: Vp729Client
+    model_name: str
+    custom_refresh: bool = False
+    refresh_seconds: int = 60
+    applied_options: dict = field(default_factory=dict)
+
+
+type KramerConfigEntry = ConfigEntry[KramerData | Vp729Data]
 
 
 def source_options(data: KramerData) -> list[str]:

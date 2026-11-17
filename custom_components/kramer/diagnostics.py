@@ -14,7 +14,7 @@ from .const import (
     CONF_OUTPUT_NAMES,
     CONF_PRESET_DESCRIPTIONS,
 )
-from .entity import KramerConfigEntry
+from .entity import KramerConfigEntry, Vp729Data
 
 TO_REDACT = {
     CONF_HOST,
@@ -32,6 +32,28 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
     """Return what is useful for fault-finding, without addresses or names."""
     client = entry.runtime_data.client
     data = entry.runtime_data
+    if isinstance(data, Vp729Data):
+        return {
+            "entry": async_redact_data(
+                {
+                    "title": entry.title,
+                    "unique_id": entry.unique_id,
+                    "data": dict(entry.data),
+                    "options": dict(entry.options),
+                },
+                TO_REDACT,
+            ),
+            "model": data.model_name,
+            "firmware": client.firmware,
+            "state": {
+                "available": client.available,
+                "values": {str(fn): value for fn, value in sorted(client.values.items())},
+                "unavailable_functions": {str(fn): code for fn, code in sorted(client.errors.items())},
+                "last_reply": client.last_reply.isoformat() if client.last_reply else None,
+                "last_error": client.last_error,
+                "last_error_time": client.last_error_time.isoformat() if client.last_error_time else None,
+            },
+        }
     return {
         "entry": async_redact_data(
             {

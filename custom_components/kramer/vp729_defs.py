@@ -1,0 +1,430 @@
+"""Control table for the Kramer VP-729 presentation scaler/switcher.
+
+Function numbers, ranges and option names come from the VP-729 communication
+protocol in the Kramer manual. Nothing here imports Home Assistant.
+
+`depends_on` lists the functions whose value decides whether a control can be
+read or set (for example H-zoom needs the aspect ratio set to Custom). When
+one of those changes, the dependent controls are read again straight away.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+KIND_SELECT = "select"
+KIND_NUMBER = "number"
+KIND_SWITCH = "switch"
+KIND_BUTTON = "button"
+KIND_SENSOR = "sensor"
+
+# Errors from the unit that mean "not available at the moment / on this input".
+UNAVAILABLE_ERRORS = (2, 3, 7)
+
+
+@dataclass(frozen=True)
+class Control:
+    """One function of the unit."""
+
+    fn: int
+    key: str
+    name: str
+    kind: str
+    options: dict[int, str] | None = None
+    minimum: int | None = None
+    maximum: int | None = None
+    writable: bool = True
+    depends_on: tuple[int, ...] = ()
+    press_value: int | None = None  # buttons: value sent with the key press (None = none)
+    settle: float = 0.0  # seconds the unit stays silent after a set
+    diagnostic: bool = False
+    icon: str | None = None
+    unit: str | None = None
+    note: str = ""
+
+    @property
+    def readable(self) -> bool:
+        """Return whether the unit can be asked for this value."""
+        return self.kind != KIND_BUTTON
+
+
+def _on_off(fn: int, key: str, name: str, **kw) -> Control:
+    return Control(fn, key, name, KIND_SWITCH, options={0: "Off", 1: "On"}, **kw)
+
+
+_LEVEL4 = {0: "Off", 1: "Low", 2: "Medium", 3: "High"}
+_LEVEL3 = {0: "Off", 1: "Low", 2: "High"}
+
+OUTPUT_RESOLUTIONS = {
+    0: "Native HDMI",
+    1: "640x480@60Hz",
+    2: "640x480@75Hz",
+    3: "800x600@50Hz",
+    4: "800x600@60Hz",
+    5: "800x600@75Hz",
+    6: "1024x768@50Hz",
+    7: "1024x768@60Hz",
+    8: "1024x768@75Hz",
+    9: "1280x768@50Hz",
+    10: "1280x768@60Hz",
+    11: "1280x720@60Hz",
+    12: "1280x800@60Hz",
+    13: "1280x1024@50Hz",
+    14: "1280x1024@60Hz",
+    15: "1280x1024@75Hz",
+    16: "1366x768@50Hz",
+    17: "1366x768@60Hz",
+    18: "1400x1050@50Hz",
+    19: "1400x1050@60Hz",
+    20: "1600x1200@50Hz",
+    21: "1600x1200@60Hz",
+    22: "1680x1050@60Hz",
+    23: "1920x1080@60Hz",
+    24: "1920x1200@60Hz",
+    25: "480p@60Hz",
+    26: "576p@60Hz",
+    27: "720p@50Hz",
+    28: "720p@60Hz",
+    29: "1080i@50Hz",
+    30: "1080i@60Hz",
+    31: "1080p@50Hz",
+    32: "1080p@60Hz",
+    33: "480p@59.94Hz",
+    34: "720p@59.94Hz",
+    35: "1080i@59.94Hz",
+    36: "1080p@23.98Hz",
+    37: "1080p@29.97Hz",
+    38: "1080p@59.94Hz",
+    96: "Custom 1",
+    97: "Custom 2",
+    98: "Custom 3",
+    99: "Custom 4",
+}
+
+INPUT_STATUS = {
+    0: "640x480 60",
+    1: "640x480 67 Mac13",
+    2: "640x480 72",
+    3: "640x480 75",
+    4: "640x480 85",
+    5: "720x400 70",
+    6: "720x400 85",
+    7: "800x600 56",
+    8: "800x600 60",
+    9: "800x600 72",
+    10: "800x600 75",
+    11: "800x600 85",
+    12: "832x624 75 Mac16",
+    13: "1024x768 60",
+    14: "1024x768 70",
+    15: "1024x768 75",
+    16: "1024x768 75 Mac19",
+    17: "1024x768 85",
+    18: "1024x800 84 Sun",
+    19: "1152x864 75",
+    20: "1152x870 75 Mac21",
+    21: "1152x900 66 Sun",
+    22: "1152x900 76 Sun",
+    23: "1280x960 60",
+    24: "1280x960 85",
+    25: "1280x768 60",
+    26: "1280x1024 60",
+    27: "1280x1024 75",
+    28: "1280x1024 76 Sun",
+    29: "1280x1024 85",
+    30: "1400x1050 60",
+    31: "1400x1050 75",
+    32: "1600x1200 60",
+    33: "1680x1050 60",
+    34: "1080i 60",
+    35: "1080i 50",
+    36: "1080p 60",
+    37: "1080p 50",
+    38: "720p 60",
+    39: "720p 50",
+    40: "480i",
+    41: "480p",
+    42: "576i",
+    43: "576p",
+    44: "1280x800 60 (reduced blanking)",
+    45: "1920x1200 60",
+    46: "1920x1080 60",
+    47: "1280x720 60",
+    48: "1080p 24",
+    49: "1280x800 60",
+    50: "1440x900 60",
+    51: "1440x900 60 (reduced blanking)",
+    52: "1280x768 60 (reduced blanking)",
+    53: "1680x1050 60 (reduced blanking)",
+    54: "1366x768 60",
+    55: "1366x768 60 (reduced blanking)",
+    94: "Custom 1",
+    95: "Custom 2",
+    96: "Custom 3",
+    97: "Custom 4",
+    98: "No input detected",
+    99: "Other",
+    101: "NTSC",
+    102: "PAL",
+    103: "PAL-M",
+    104: "PAL-N",
+    105: "NTSC 4.43",
+    106: "SECAM",
+    107: "PAL-60",
+}
+
+_SOURCES = {
+    0: "Input 1",
+    1: "Input 2",
+    2: "Input 3",
+    3: "Input 4",
+    4: "VGA 1",
+    5: "VGA 2",
+    6: "HDMI 1",
+    7: "HDMI 2",
+}
+_INPUT_TYPES = {0: "Component", 1: "YC", 2: "Video"}
+_POLARITY = {0: "Negative", 1: "Positive"}
+_PROFILES = range(1, 9)
+
+CONTROLS: tuple[Control, ...] = (
+    # --- Input ---------------------------------------------------------------
+    Control(0, "input_source", "Input source", KIND_SELECT, {**_SOURCES, 8: "USB"}, icon="mdi:video-input-hdmi"),
+    Control(1, "input_1_type", "Input 1 source type", KIND_SELECT, _INPUT_TYPES),
+    Control(2, "input_2_type", "Input 2 source type", KIND_SELECT, _INPUT_TYPES),
+    Control(3, "input_3_type", "Input 3 source type", KIND_SELECT, _INPUT_TYPES),
+    Control(4, "input_4_type", "Input 4 source type", KIND_SELECT, _INPUT_TYPES),
+    Control(5, "input_colour_format", "Input colour format", KIND_SELECT, {0: "Auto", 1: "RGB", 2: "YUV"}, depends_on=(0,)),
+    Control(
+        6,
+        "input_video_standard",
+        "Input video standard",
+        KIND_SELECT,
+        {0: "Auto", 1: "NTSC", 2: "PAL", 3: "PAL-M", 4: "PAL-N", 5: "NTSC 4.43", 6: "SECAM", 7: "PAL-60"},
+        depends_on=(0,),
+    ),
+    Control(7, "input_h_position", "Input H-position", KIND_NUMBER, minimum=1, maximum=50, depends_on=(0,)),
+    Control(8, "input_v_position", "Input V-position", KIND_NUMBER, minimum=2, maximum=50, depends_on=(0,)),
+    Control(9, "input_frequency", "Input frequency", KIND_NUMBER, minimum=0, maximum=50, depends_on=(0,)),
+    Control(10, "input_phase", "Input phase", KIND_NUMBER, minimum=0, maximum=31, depends_on=(0,)),
+    Control(11, "auto_image", "Auto image", KIND_BUTTON, icon="mdi:auto-fix"),
+    # --- Picture -------------------------------------------------------------
+    Control(12, "brightness", "Brightness", KIND_NUMBER, minimum=0, maximum=100),
+    Control(13, "contrast", "Contrast", KIND_NUMBER, minimum=0, maximum=100),
+    Control(14, "colour", "Colour", KIND_NUMBER, minimum=0, maximum=100),
+    Control(15, "hue", "Hue", KIND_NUMBER, minimum=0, maximum=360),
+    Control(16, "sharpness", "Sharpness", KIND_NUMBER, minimum=0, maximum=100),
+    Control(17, "gamma", "Output gamma", KIND_SELECT, {0: "Gamma 1", 1: "Gamma 2", 2: "Gamma 3", 3: "Gamma 4", 4: "Gamma 5"}),
+    Control(18, "film_mode", "Film mode", KIND_SELECT, {0: "Auto", 1: "Video", 2: "Film"}),
+    Control(19, "temporal_nr", "Temporal noise reduction", KIND_SELECT, _LEVEL4),
+    Control(20, "mosquito_nr", "Mosquito noise reduction", KIND_SELECT, _LEVEL4),
+    _on_off(21, "block_nr", "Block noise reduction"),
+    Control(22, "detail_enhancement", "Detail enhancement", KIND_SELECT, _LEVEL4),
+    Control(23, "luma_transition", "Luma transition enhancement", KIND_SELECT, _LEVEL3),
+    Control(24, "chroma_transition", "Chroma transition enhancement", KIND_SELECT, _LEVEL3),
+    # --- Output --------------------------------------------------------------
+    Control(25, "output_resolution", "Output resolution", KIND_SELECT, OUTPUT_RESOLUTIONS, icon="mdi:monitor"),
+    Control(26, "hdmi_type", "Output HDMI type", KIND_SELECT, {0: "Auto", 1: "HDMI", 2: "DVI"}),
+    Control(
+        27,
+        "aspect_ratio",
+        "Aspect ratio",
+        KIND_SELECT,
+        {0: "Best fit", 1: "Letterbox", 2: "Follow output", 3: "Virtual wide", 4: "Follow input", 5: "Custom"},
+        icon="mdi:aspect-ratio",
+    ),
+    # --- Pan and zoom ----------------------------------------------------------
+    Control(28, "h_pan", "H-pan", KIND_NUMBER, minimum=-16, maximum=16, depends_on=(27, 30)),
+    Control(29, "v_pan", "V-pan", KIND_NUMBER, minimum=-16, maximum=16, depends_on=(27, 31)),
+    Control(30, "h_zoom", "H-zoom", KIND_NUMBER, minimum=-8, maximum=8, depends_on=(27,)),
+    Control(31, "v_zoom", "V-zoom", KIND_NUMBER, minimum=-8, maximum=8, depends_on=(27,)),
+    Control(
+        32,
+        "zoom",
+        "Zoom",
+        KIND_SELECT,
+        {
+            0: "100%",
+            1: "150%",
+            2: "200%",
+            3: "225%",
+            4: "250%",
+            5: "275%",
+            6: "300%",
+            7: "325%",
+            8: "350%",
+            9: "375%",
+            10: "400%",
+            11: "Custom",
+        },
+        depends_on=(27,),
+        icon="mdi:magnify-plus-outline",
+    ),
+    Control(33, "custom_zoom", "Custom zoom", KIND_NUMBER, minimum=0, maximum=32, depends_on=(27, 32)),
+    Control(34, "zoom_h_pan", "Zoom H-pan", KIND_NUMBER, minimum=0, maximum=31, depends_on=(27, 32, 33)),
+    Control(35, "zoom_v_pan", "Zoom V-pan", KIND_NUMBER, minimum=0, maximum=31, depends_on=(27, 32, 33)),
+    # --- Picture in picture ----------------------------------------------------
+    _on_off(36, "pip", "Picture in picture", icon="mdi:picture-in-picture-bottom-right"),
+    Control(37, "pip_type", "PIP type", KIND_SELECT, {0: "Picture-in-picture", 1: "Picture + picture", 2: "Split"}, depends_on=(36,)),
+    Control(38, "pip_source", "PIP source", KIND_SELECT, _SOURCES, icon="mdi:video-input-component"),
+    Control(39, "pip_size", "PIP size", KIND_SELECT, {0: "1/25", 1: "1/16", 2: "1/9", 3: "1/4", 4: "Custom"}, depends_on=(36,)),
+    Control(40, "pip_h_position", "PIP H-position", KIND_NUMBER, minimum=0, maximum=128, depends_on=(36, 39)),
+    Control(41, "pip_v_position", "PIP V-position", KIND_NUMBER, minimum=0, maximum=128, depends_on=(36, 39)),
+    Control(42, "pip_h_size", "PIP H-size", KIND_NUMBER, minimum=1, maximum=256, depends_on=(36, 39)),
+    Control(43, "pip_v_size", "PIP V-size", KIND_NUMBER, minimum=1, maximum=256, depends_on=(36, 39)),
+    _on_off(44, "pip_frame", "PIP frame", depends_on=(36,)),
+    Control(45, "pip_frame_colour", "PIP frame colour", KIND_SELECT, {0: "Red", 1: "Green", 2: "Blue"}, depends_on=(36,)),
+    # --- Audio -----------------------------------------------------------------
+    Control(46, "audio_input_type", "Audio input type", KIND_SELECT, {0: "Analogue", 1: "S/PDIF"}),
+    Control(47, "audio_input_volume", "Audio input volume", KIND_NUMBER, minimum=-22, maximum=22),
+    Control(48, "audio_output_volume", "Audio output volume", KIND_NUMBER, minimum=-100, maximum=24),
+    Control(49, "bass", "Bass", KIND_NUMBER, minimum=-36, maximum=36),
+    Control(50, "treble", "Treble", KIND_NUMBER, minimum=-36, maximum=36),
+    Control(51, "balance", "Balance", KIND_NUMBER, minimum=-10, maximum=10),
+    _on_off(52, "loudness", "Loudness"),
+    Control(53, "audio_delay", "Audio delay mode", KIND_SELECT, {0: "Dynamic", 1: "User defined"}),
+    Control(
+        54,
+        "user_delay",
+        "User audio delay (2 ms steps)",
+        KIND_SENSOR,
+        writable=False,
+        depends_on=(53,),
+        note="0 to 340, read only; needs the audio delay mode set to User defined",
+    ),
+    Control(
+        55,
+        "usb_audio_input",
+        "Audio input for USB",
+        KIND_SELECT,
+        {0: "No audio", 1: "Input 1", 2: "Input 2", 3: "Input 3", 4: "Input 4", 5: "VGA 1", 6: "VGA 2", 7: "HDMI 1", 8: "HDMI 2"},
+    ),
+    # --- Geometry --------------------------------------------------------------
+    Control(56, "geometry_application", "Geometry application", KIND_SELECT, {0: "Keystone", 1: "Anyplace", 2: "Rotation"}),
+    Control(57, "geometry_location", "Geometry location", KIND_SELECT, {0: "Front", 1: "Ceiling", 2: "Rear", 3: "Rear ceiling"}),
+    Control(58, "h_keystone", "Horizontal keystone", KIND_NUMBER, minimum=-40, maximum=40),
+    Control(59, "v_keystone", "Vertical keystone", KIND_NUMBER, minimum=-30, maximum=30),
+    Control(60, "top_left_h", "Top left H", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
+    Control(61, "top_left_v", "Top left V", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
+    Control(62, "top_right_h", "Top right H", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
+    Control(63, "top_right_v", "Top right V", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
+    Control(64, "bottom_left_h", "Bottom left H", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
+    Control(65, "bottom_left_v", "Bottom left V", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
+    Control(66, "bottom_right_h", "Bottom right H", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
+    Control(67, "bottom_right_v", "Bottom right V", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
+    Control(69, "pincushion_barrel", "Pincushion/barrel", KIND_NUMBER, minimum=-20, maximum=20),
+    Control(70, "rotation", "Rotation", KIND_NUMBER, minimum=-180, maximum=180, depends_on=(56,)),
+    # --- Set-up and display ----------------------------------------------------
+    _on_off(74, "frame_lock", "Frame lock"),
+    Control(76, "firmware", "Firmware revision", KIND_SENSOR, writable=False, diagnostic=True, icon="mdi:chip"),
+    Control(77, "mode_set_1", "Mode set 1", KIND_SELECT, {0: "1400x1050x60", 1: "1680x1050x60"}),
+    Control(78, "mode_set_2", "Mode set 2", KIND_SELECT, {0: "1280x1024x75", 1: "1280x1024x76"}),
+    Control(
+        79,
+        "osd_position",
+        "OSD menu position",
+        KIND_SELECT,
+        {0: "Centre", 1: "Top left", 2: "Top right", 3: "Bottom left", 4: "Bottom right"},
+    ),
+    Control(
+        80,
+        "osd_timeout",
+        "OSD timeout",
+        KIND_SELECT,
+        {0: "5 seconds", 1: "10 seconds", 2: "20 seconds", 3: "30 seconds", 4: "60 seconds", 5: "90 seconds", 6: "Off"},
+    ),
+    Control(81, "logo", "Logo", KIND_SELECT, {0: "Off", 1: "On", 2: "Custom"}),
+    Control(82, "blank_colour", "Blank colour", KIND_SELECT, {0: "Black", 1: "Blue"}),
+    Control(84, "background", "Background", KIND_SELECT, {0: "Black", 1: "Blue", 2: "Custom", 3: "Disable analogue sync"}),
+    Control(
+        85,
+        "save_lock",
+        "Save lock",
+        KIND_SENSOR,
+        {0: "Off", 1: "On"},
+        writable=False,
+        note="Read only until writing it has been tested on a real unit",
+    ),
+    _on_off(86, "input_lock", "Input lock"),
+    Control(87, "blank_key", "Blank key function", KIND_SELECT, {0: "Blank and mute", 1: "Blank", 2: "Mute"}),
+    Control(88, "freeze_key", "Freeze key function", KIND_SELECT, {0: "Freeze and mute", 1: "Freeze", 2: "Mute"}),
+    _on_off(89, "freeze", "Freeze", icon="mdi:snowflake"),
+    _on_off(90, "blank", "Blank", icon="mdi:monitor-off"),
+    _on_off(91, "power", "Power", settle=12.0, icon="mdi:power"),
+    _on_off(101, "mute", "Mute", icon="mdi:volume-off"),
+    _on_off(102, "front_panel_lock", "Front panel lock", icon="mdi:lock"),
+    # --- Input status (read only) ----------------------------------------------
+    Control(103, "main_input_status", "Main input status", KIND_SENSOR, INPUT_STATUS, writable=False, icon="mdi:video-input-antenna"),
+    Control(104, "pip_input_status", "PIP input status", KIND_SENSOR, INPUT_STATUS, writable=False, icon="mdi:video-input-antenna"),
+    # --- Advanced timing (read only) -------------------------------------------
+    Control(105, "adv_in_ht", "Advanced input mode HT", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(106, "adv_in_hw", "Advanced input mode HW", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(107, "adv_in_hs", "Advanced input mode HS", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(108, "adv_in_ha", "Advanced input mode HA", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(109, "adv_in_hp", "Advanced input mode HP", KIND_SENSOR, _POLARITY, writable=False, diagnostic=True),
+    Control(110, "adv_in_vt", "Advanced input mode VT", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(111, "adv_in_vw", "Advanced input mode VW", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(112, "adv_in_vs", "Advanced input mode VS", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(113, "adv_in_va", "Advanced input mode VA", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(114, "adv_in_vp", "Advanced input mode VP", KIND_SENSOR, _POLARITY, writable=False, diagnostic=True),
+    Control(115, "adv_in_oclk_int", "Advanced input mode OCLK (integer)", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(116, "adv_in_oclk_dec", "Advanced input mode OCLK (decimal)", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(117, "adv_in_enable", "Advanced input mode enabled", KIND_SENSOR, {0: "Off", 1: "On"}, writable=False, diagnostic=True),
+    Control(119, "adv_out_ht", "Advanced output mode HT", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(120, "adv_out_hw", "Advanced output mode HW", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(121, "adv_out_hs", "Advanced output mode HS", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(122, "adv_out_ha", "Advanced output mode HA", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(123, "adv_out_hp", "Advanced output mode HP", KIND_SENSOR, _POLARITY, writable=False, diagnostic=True),
+    Control(124, "adv_out_vt", "Advanced output mode VT", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(125, "adv_out_vw", "Advanced output mode VW", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(126, "adv_out_vs", "Advanced output mode VS", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(127, "adv_out_va", "Advanced output mode VA", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(128, "adv_out_vp", "Advanced output mode VP", KIND_SENSOR, _POLARITY, writable=False, diagnostic=True),
+    Control(129, "adv_out_oclk_int", "Advanced output mode OCLK (integer)", KIND_SENSOR, writable=False, diagnostic=True),
+    Control(130, "adv_out_oclk_dec", "Advanced output mode OCLK (decimal)", KIND_SENSOR, writable=False, diagnostic=True),
+    # --- Keys (press only) -------------------------------------------------------
+    Control(83, "capture", "Capture", KIND_BUTTON, icon="mdi:camera"),
+    Control(92, "key_info", "Info", KIND_BUTTON, icon="mdi:information-outline"),
+    Control(93, "key_menu", "Menu", KIND_BUTTON, icon="mdi:menu"),
+    Control(94, "key_top", "Top", KIND_BUTTON, icon="mdi:arrow-up-bold"),
+    Control(95, "key_down", "Down", KIND_BUTTON, icon="mdi:arrow-down-bold"),
+    Control(96, "key_left", "Left", KIND_BUTTON, icon="mdi:arrow-left-bold"),
+    Control(97, "key_right", "Right", KIND_BUTTON, icon="mdi:arrow-right-bold"),
+    Control(98, "key_enter", "Enter", KIND_BUTTON, icon="mdi:keyboard-return"),
+    Control(99, "key_picture", "Picture", KIND_BUTTON, icon="mdi:image"),
+    Control(100, "key_swap", "Swap", KIND_BUTTON, icon="mdi:swap-horizontal"),
+)
+
+# Volume up/down are the same function (48) with a special value, and the
+# profiles are one function (72 save, 73 recall) with a profile number, so
+# they get their own button definitions.
+VOLUME_BUTTONS: tuple[tuple[str, str, int, str], ...] = (
+    ("volume_up", "Volume up", 111, "mdi:volume-plus"),
+    ("volume_down", "Volume down", -111, "mdi:volume-minus"),
+)
+
+PROFILE_SAVE_FN = 72
+PROFILE_RECALL_FN = 73
+PROFILE_SETTLE_SECONDS = 12.0
+PROFILE_COUNT = len(_PROFILES)
+
+BY_FN: dict[int, Control] = {control.fn: control for control in CONTROLS}
+READABLE: tuple[Control, ...] = tuple(control for control in CONTROLS if control.readable)
+
+# Functions whose reading depends on another function, for re-reading after a change.
+DEPENDENTS: dict[int, tuple[int, ...]] = {}
+for _control in CONTROLS:
+    for _dep in _control.depends_on:
+        DEPENDENTS.setdefault(_dep, ())
+        DEPENDENTS[_dep] = (*DEPENDENTS[_dep], _control.fn)
+
+
+def label(control: Control, value: int | str | None) -> str | None:
+    """Return the text for a value of a control with named options."""
+    if value is None:
+        return None
+    if control.options is None:
+        return str(value)
+    if isinstance(value, int) and value in control.options:
+        return control.options[value]
+    return f"Unknown ({value})"

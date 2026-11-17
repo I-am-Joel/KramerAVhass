@@ -8,14 +8,19 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import MAX_REFRESH, MIN_REFRESH
-from .entity import KramerConfigEntry, KramerEntity, save_refresh
+from .entity import KramerConfigEntry, KramerEntity, Vp729Data, save_refresh
+from .vp729_defs import KIND_NUMBER
+from .vp729_entity import build as vp729_build
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: KramerConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the refresh interval setting."""
-    async_add_entities([KramerRefreshInterval(entry)])
+    """Set up the refresh interval setting (and, for a VP-729, its numeric settings)."""
+    entities: list[KramerEntity] = [KramerRefreshInterval(entry)]
+    if isinstance(entry.runtime_data, Vp729Data):
+        entities += vp729_build(entry, KIND_NUMBER)
+    async_add_entities(entities)
 
 
 class KramerRefreshInterval(KramerEntity, NumberEntity):

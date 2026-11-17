@@ -9,7 +9,9 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import KramerConfigEntry, KramerEntity, save_refresh
+from .entity import KramerConfigEntry, KramerEntity, Vp729Data, save_refresh
+from .vp729_defs import KIND_SWITCH
+from .vp729_entity import build as vp729_build
 
 
 async def async_setup_entry(
@@ -18,7 +20,9 @@ async def async_setup_entry(
     """Set up the lock switch, only for units that have one."""
     data = entry.runtime_data
     entities: list[SwitchEntity] = [KramerCustomRefreshSwitch(entry)]
-    if data.supports_lock and data.client.lock_supported is not False:
+    if isinstance(data, Vp729Data):
+        entities += vp729_build(entry, KIND_SWITCH)
+    elif data.supports_lock and data.client.lock_supported is not False:
         entities.append(KramerLockSwitch(entry))
     async_add_entities(entities)
 

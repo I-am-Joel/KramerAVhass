@@ -3,34 +3,20 @@
     "step": {
       "user": {
         "title": "Kramer switcher or scaler",
-        "description": "Configure for use with your connected device",
+        "description": "Choose the model. The next screen asks for its address.",
         "data": {
-          "name": "Name",
-          "ip_address": "IP address",
-          "port": "Port",
-          "machine": "Machine number (1 unless daisy-chained)",
           "model": "Model"
-        }
-      },
-      "vp729": {
-        "title": "VP-729 connection",
-        "description": "The VP-729 is controlled over its Ethernet port. The factory port is 5000. In the unit's network module, \"Password Required\" on that port must be set to No.",
-        "data": {
-          "port": "Port"
         }
       },
       "reconfigure": {
         "title": "Reconfigure Kramer unit",
+        "description": "Choose the model. The next screen asks for its address.",
         "data": {
-          "name": "Name",
-          "ip_address": "IP address",
-          "port": "Port",
-          "machine": "Machine number (1 unless daisy-chained)",
           "model": "Model"
         }
       },
       "other": {
-        "title": "Other model",
+        "title": "Other model (Protocol 2000)",
         "description": "Configure your switcher. If you don't know how many presets it supports you can leave it at 0 and change it later using \"Reconfigure\".",
         "data": {
           "model_name": "Model name",
@@ -38,6 +24,16 @@
           "outputs": "Number of outputs",
           "supports_modes": "Supports separate audio and video switching",
           "preset_slots": "Number of presets the unit can store (0 if none)"
+        }
+      },
+      "connection": {
+        "title": "Connection",
+        "description": "Address of your {model}. {note}",
+        "data": {
+          "name": "Name",
+          "ip_address": "IP address",
+          "port": "Port",
+          "machine": "Machine number (1 unless daisy-chained)"
         }
       }
     },

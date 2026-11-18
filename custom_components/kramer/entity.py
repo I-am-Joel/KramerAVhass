@@ -19,6 +19,7 @@ from .const import (
     SOURCE_MIXED,
     SOURCE_OFF,
 )
+from .models import PROTOCOL_2000, PROTOCOL_ASCII, model_label
 from .protocol import KramerClient, KramerError
 from .vp729_protocol import Vp729Client
 
@@ -41,6 +42,7 @@ class KramerData:
     custom_refresh: bool = False
     refresh_seconds: int = 60
     applied_options: dict = field(default_factory=dict)
+    protocol: str = PROTOCOL_2000
 
     @property
     def breakaway(self) -> bool:
@@ -67,6 +69,7 @@ class Vp729Data:
     custom_refresh: bool = False
     refresh_seconds: int = 60
     applied_options: dict = field(default_factory=dict)
+    protocol: str = PROTOCOL_ASCII
 
 
 type KramerConfigEntry = ConfigEntry[KramerData | Vp729Data]
@@ -162,7 +165,7 @@ class KramerEntity(Entity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             manufacturer="Kramer",
-            model=self._data.model_name,
+            model=model_label(self._data.model_name, self._data.protocol),
             name=entry.title,
         )
 

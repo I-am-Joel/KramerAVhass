@@ -17,7 +17,13 @@ Behaviour seen on a real unit, which this client allows for:
    replies are matched by function number with one command in flight;
  * a set to an out-of-range value is echoed as success but ignored, so every
    set is read back;
- * after a power-on or a profile recall the unit is silent for about ten seconds.
+ * it takes a fraction of a second (up to about 0.3 s) to report a value it has
+   just accepted, so a set is confirmed by reading back for up to two seconds;
+ * commands sent too close together are garbled ("ERR 1"): each command waits for
+   the ">" prompt of the one before, and a garbled set is sent once more;
+ * after a power-on (about 8 s) or a profile recall (about 15 s) the unit is
+   silent, and a profile save is acknowledged only after about 9 s;
+ * in standby the unit answers only the power function.
 
 This module has no Home Assistant imports so it can be tested on its own.
 """
@@ -39,7 +45,15 @@ from .protocol import (
     _close,
     _enable_keepalive,
 )
-from .vp729_defs import BY_FN, DEPENDENTS, READABLE, UNAVAILABLE_ERRORS
+from .vp729_defs import (
+    BY_FN,
+    DEPENDENTS,
+    INPUT_DEPENDENT_FNS,
+    POWER_FN,
+    READABLE,
+    UNAVAILABLE_ERRORS,
+    unavailable_reason,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +62,13 @@ _ERROR = re.compile(r"^ERR\s*(\d+)")
 _INT = re.compile(r"^-?\d+$")
 
 FIRMWARE_FN = 76
+
+VERIFY_SECONDS = 2.0  # how long a set is read back for before it is called refused
+VERIFY_FIRST_WAIT = 0.15
+VERIFY_INTERVAL = 0.25
+PROMPT_WAIT = 0.5  # how long to wait for ">" after a reply
+PACING_GAP = 0.03  # a short pause after the prompt
+MAX_HOLD_WAIT = 30.0
 
 ERROR_TEXT = {
     1: "bad command",
@@ -64,10 +85,10 @@ ERROR_TEXT = {
 class Vp729CommandError(KramerCommandError):
     """The unit answered with an ERR code."""
 
-    def __init__(self, code: int) -> None:
+    def __init__(self, code: int, message: str | None = None) -> None:
         """Keep the code with a readable message."""
         self.code = code
-        super().__init__(f"Unit reported: {ERROR_TEXT.get(code, f'error {code}')}")
+        super().__init__(message or f"Unit reported: {ERROR_TEXT.get(code, f'error {code}')}")
 
 
 def parse_value(text: str | None) -> int | str | None:
@@ -168,6 +189,9 @@ class Vp729Client:
         self._refresh_event = asyncio.Event()
         self._ready = asyncio.Event()
         self._hold_until = 0.0
+        self._busy_count = 0
+        self._set_seq: dict[int, int] = {}
+        self._prompt = asyncio.Event()
         self._full_refresh = True
         self._dirty: set[int] = set()
 
@@ -198,8 +222,28 @@ class Vp729Client:
         return self.values.get(fn)
 
     def function_available(self, fn: int) -> bool:
-        """Return whether the unit is connected and has given a value for this function."""
-        return self.available and fn not in self.errors and self.values.get(fn) is not None
+        """Return whether the unit is connected, awake and has given a value for this function."""
+        if not self.available:
+            return False
+        if fn != POWER_FN and self.values.get(POWER_FN) == 0:
+            return False  # in standby the unit answers only the power function
+        return fn not in self.errors and self.values.get(fn) is not None
+
+    @property
+    def standby(self) -> bool:
+        """Return whether the unit reports that it is in standby."""
+        return self.available and self.values.get(POWER_FN) == 0
+
+    @property
+    def busy(self) -> bool:
+        """Return whether a slow action (profile save or recall, power on) is under way or settling."""
+        return self._busy_count > 0 or time.monotonic() < self._hold_until
+
+    def reason_unavailable(self, fn: int) -> str | None:
+        """Say why a function cannot be used now (None while it works or when nothing is known)."""
+        if not self.available or self.function_available(fn):
+            return None
+        return unavailable_reason(fn, self.values) or "Not available at the moment"
 
     def add_listener(self, callback: Callable[[], None]) -> Callable[[], None]:
         """Register a callback for any state change; returns a remover."""
@@ -276,36 +320,99 @@ class Vp729Client:
     # ------------------------------------------------------------------
 
     async def async_set(self, fn: int, value: int, *, settle: float = 0.0) -> None:
-        """Set a function and confirm it by reading it back.
+        """Set a function and confirm it by reading it back, all as one uninterrupted step.
+
+        If another value for the same function is asked for while this one is
+        waiting its turn, only the newest is sent (fast repeated changes).
 
         With `settle` the unit is expected to go quiet for that many seconds
-        (power on, profile recall): no read-back is made, the value is taken as
-        set, and a full refresh follows once the unit has had time.
+        (power on): no read-back is made, the value is taken as set, and a full
+        refresh follows once the unit has had time.
         """
-        try:
-            await self._request(fn, write=True, value=value)
-        except KramerTimeoutError:
+        seq = self._set_seq[fn] = self._set_seq.get(fn, 0) + 1
+        async with self._lock:
+            if self._set_seq.get(fn) != seq:
+                return  # replaced by a newer value
+            try:
+                await self._send(fn, write=True, value=value, retry_garbled=True)
+            except Vp729CommandError as err:
+                raise self._explain(fn, err) from err
+            except KramerTimeoutError:
+                if settle:
+                    raise
+                # A late confirmation is still possible, so the read-back decides.
             if settle:
-                raise
-            # A late confirmation is still possible, so the read-back decides.
-        if settle:
-            self.values[fn] = value
-            self._settle(settle)
-            self._notify()
-            self.async_request_refresh()
-            return
-        got = await self._get(fn)
+                self.values[fn] = value
+                self._settle(settle)
+                self._notify()
+                self.async_request_refresh()
+                return
+            got = await self._verify(fn, value)
         if got != value:
-            raise Vp729CommandError(1) if got is None else KramerCommandError(
+            raise KramerCommandError(
                 f"The unit did not accept {value} for function {fn} (it still reads {got})"
             )
+        self.values[fn] = value
         self._after_change(fn)
 
-    async def async_press(self, fn: int, value: int | None = None, *, settle: float = 0.0) -> None:
-        """Send a key press or other action (write only)."""
-        await self._request(fn, write=True, value=value)
-        if settle:
+    async def _verify(self, fn: int, value: int) -> int | str | None:
+        """Read a function back until it shows the wanted value (the unit is slow to report it)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + VERIFY_SECONDS
+        await asyncio.sleep(VERIFY_FIRST_WAIT)
+        got: int | str | None = None
+        while True:
+            try:
+                got = await self._get_locked(fn)
+            except Vp729CommandError as err:
+                raise self._explain(fn, err) from err
+            if got == value or loop.time() >= deadline:
+                return got
+            await asyncio.sleep(VERIFY_INTERVAL)
+
+    def _explain(self, fn: int, err: Vp729CommandError) -> Vp729CommandError:
+        """Replace a bare "not available" with what is actually missing, where that is known."""
+        if err.code in UNAVAILABLE_ERRORS:
+            reason = unavailable_reason(fn, self.values)
+            if reason is None and fn in INPUT_DEPENDENT_FNS:
+                reason = "Not available for the selected input"
+            if reason:
+                return Vp729CommandError(err.code, reason)
+        return err
+
+    async def async_press(
+        self,
+        fn: int,
+        value: int | None = None,
+        *,
+        settle: float = 0.0,
+        timeout: float | None = None,
+        busy: bool = False,
+    ) -> None:
+        """Send a key press or other action (write only).
+
+        `timeout` allows a slow acknowledgement (a profile save takes about 9 s);
+        `busy` marks the unit as busy while it is under way; `settle` holds all
+        other commands for that long afterwards.
+        """
+        if busy:
+            self._busy_count += 1
+            self._notify()
+        try:
+            async with self._lock:
+                try:
+                    await self._send(fn, write=True, value=value, timeout=timeout)
+                except Vp729CommandError as err:
+                    raise self._explain(fn, err) from err
+        finally:
+            if busy:
+                self._busy_count -= 1
+                if settle:
+                    self._settle(settle)
+                self._notify()
+        if settle and not busy:
             self._settle(settle)
+        if settle:
             self.async_request_refresh()
         else:
             # Auto image, capture and similar can change what the unit reports.
@@ -318,6 +425,8 @@ class Vp729Client:
 
     def _settle(self, seconds: float) -> None:
         self._hold_until = max(self._hold_until, time.monotonic() + seconds)
+        with contextlib.suppress(RuntimeError):
+            asyncio.get_running_loop().call_later(seconds + 0.1, self._notify)
 
     def _after_change(self, fn: int) -> None:
         """Re-read everything whose availability depends on this function."""
@@ -329,44 +438,75 @@ class Vp729Client:
         self._notify()
 
     async def _request(self, fn: int, *, write: bool, value: int | None = None) -> str | None:
-        """Send one command and wait for the reply to that function."""
+        """Send one command (taking its turn) and return the reply text."""
+        async with self._lock:
+            return await self._send(fn, write=write, value=value)
+
+    async def _send(
+        self,
+        fn: int,
+        *,
+        write: bool,
+        value: int | None = None,
+        timeout: float | None = None,
+        retry_garbled: bool = False,
+    ) -> str | None:
+        """Send one command; the caller holds the lock. Waits for the reply and the prompt after it."""
+        for attempt in range(2):
+            try:
+                return await self._send_once(fn, write=write, value=value, timeout=timeout)
+            except Vp729CommandError as err:
+                if err.code == 1 and attempt == 0 and (retry_garbled or not write):
+                    continue  # a garbled command: sets are safe to repeat
+                raise
+        return None  # pragma: no cover
+
+    async def _send_once(self, fn: int, *, write: bool, value: int | None, timeout: float | None) -> str | None:
         if write:
             command = f"Y 0 {fn}" + ("" if value is None else f" {value}")
         else:
             command = f"Y 1 {fn}"
-        async with self._lock:
-            delay = self._hold_until - time.monotonic()
-            if delay > 0:
-                await asyncio.sleep(min(delay, 15.0))
-            writer = self._writer
-            if writer is None or writer.is_closing():
-                raise KramerConnectionError("Not connected")
-            future: asyncio.Future = asyncio.get_running_loop().create_future()
-            self._pending = (fn, 0 if write else 1, future)
+        delay = self._hold_until - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(min(delay, MAX_HOLD_WAIT))
+        writer = self._writer
+        if writer is None or writer.is_closing():
+            raise KramerConnectionError("Not connected")
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._pending = (fn, 0 if write else 1, future)
+        self._prompt.clear()
+        try:
+            writer.write(f"{command}\r".encode("ascii"))
+            await writer.drain()
             try:
-                writer.write(f"{command}\r".encode("ascii"))
-                await writer.drain()
-                reply = await asyncio.wait_for(future, self._request_timeout)
-            except TimeoutError as err:
-                self._record_error(f"No reply to {command}")
-                raise KramerTimeoutError(f"No reply to {command}") from err
-            except OSError as err:
-                raise KramerConnectionError(str(err)) from err
-            finally:
-                self._pending = None
+                reply = await asyncio.wait_for(future, timeout or self._request_timeout)
+            except Vp729CommandError:
+                await self._pace()
+                raise
+        except TimeoutError as err:
+            self._record_error(f"No reply to {command}")
+            raise KramerTimeoutError(f"No reply to {command}") from err
+        except OSError as err:
+            raise KramerConnectionError(str(err)) from err
+        finally:
+            self._pending = None
+        await self._pace()
         return reply
 
+    async def _pace(self) -> None:
+        """Wait for the unit's ">" prompt, then a short pause, before the next command."""
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(self._prompt.wait(), PROMPT_WAIT)
+        await asyncio.sleep(PACING_GAP)
+
+    async def _get_locked(self, fn: int) -> int | str | None:
+        """Read a function; the caller holds the lock."""
+        return parse_value(await self._send(fn, write=False))
+
     async def _get(self, fn: int) -> int | str | None:
-        """Read a function, trying again once after a garbled command."""
-        for attempt in range(2):
-            try:
-                reply = await self._request(fn, write=False)
-            except Vp729CommandError as err:
-                if err.code == 1 and attempt == 0:
-                    continue
-                raise
-            return parse_value(reply)
-        return None  # pragma: no cover
+        """Read a function, taking its turn (a garbled read is sent once more)."""
+        async with self._lock:
+            return await self._get_locked(fn)
 
     async def _read_into_state(self, fn: int) -> int | str | None:
         """Read a function and record the value, or why it cannot be read."""
@@ -455,9 +595,17 @@ class Vp729Client:
             await self._read_into_state(fn)
 
     async def _refresh(self) -> None:
-        """Read every readable function."""
+        """Read every readable function (in standby only the power function answers)."""
+        await self._read_into_state(POWER_FN)
+        if self.values.get(POWER_FN) == 0:
+            self._set_available(True)
+            self._ready.set()
+            self._notify()
+            return
         timeouts = 0
         for control in READABLE:
+            if control.fn == POWER_FN:
+                continue
             try:
                 await self._read_into_state(control.fn)
                 timeouts = 0
@@ -478,6 +626,8 @@ class Vp729Client:
             chunk = await reader.read(256)
             if not chunk:
                 raise KramerConnectionError("Connection closed by the other end")
+            if b">" in chunk:
+                self._prompt.set()
             buffer.extend(chunk)
             for line in parse_lines(buffer):
                 self._handle_line(line)
@@ -509,5 +659,7 @@ class Vp729Client:
             self.errors.pop(fn, None)
             if control_type == 0:
                 self._after_change(fn)  # a push: dependants may have changed
+                if fn == POWER_FN:
+                    self.async_request_refresh()  # woke up or went to standby: read it all again
             else:
                 self._notify()

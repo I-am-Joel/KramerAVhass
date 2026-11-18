@@ -10,7 +10,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .const import DEFAULT_PORT, DEFAULT_VP729_PORT
+
 OTHER = "other"
+PROTOCOL_2000 = "Protocol 2000"
+PROTOCOL_ASCII = "ASCII"
 VP729_KEY = "vp-729"  # the VP-729 presentation scaler/switcher (not a matrix, so not in MODELS)
 VP729_NAME = "VP-729"
 MAX_PORTS = 127
@@ -30,6 +34,7 @@ class KramerModel:
     supports_lock: bool = True
     preset_slots: int = 0
     notes: str = ""
+    default_port: int = DEFAULT_PORT
 
 
 MODELS: dict[str, KramerModel] = {
@@ -109,3 +114,28 @@ def resolve_notes(data: Mapping[str, Any]) -> str:
     """Return the notes shipped with a model (empty for unknown models)."""
     key = resolve_model_key(data.get("model"))
     return MODELS[key].notes if key else ""
+
+
+def model_label(name: str, protocol: str) -> str:
+    """Return a model name with its protocol, for example "VS-808YC (Protocol 2000)"."""
+    return f"{name} ({protocol})"
+
+
+OTHER_LABEL = f"Other ({PROTOCOL_2000} switchers only)"
+
+
+def model_choices() -> list[tuple[str, str]]:
+    """Return (key, label) for the setup dropdown: alphabetical, with "Other" last."""
+    choices = [(m.key, model_label(m.name, PROTOCOL_2000)) for m in MODELS.values()]
+    choices.append((VP729_KEY, model_label(VP729_NAME, PROTOCOL_ASCII)))
+    choices.sort(key=lambda item: item[1].casefold())
+    choices.append((OTHER, OTHER_LABEL))
+    return choices
+
+
+def default_port_for(model: str | None) -> int:
+    """Return the port a model normally listens on."""
+    if model == VP729_KEY:
+        return DEFAULT_VP729_PORT
+    key = resolve_model_key(model)
+    return MODELS[key].default_port if key else DEFAULT_PORT

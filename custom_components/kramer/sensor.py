@@ -358,6 +358,7 @@ class KramerStatusSensor(KramerEntity, SensorEntity):
             "schema_version": STATUS_SCHEMA_VERSION,
             "name": self._title,
             "model": data.model_name,
+            "protocol": data.protocol,
             "inputs": client.inputs,
             "outputs": client.outputs,
             "features": {

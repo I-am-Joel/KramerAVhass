@@ -44,6 +44,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
                 TO_REDACT,
             ),
             "model": data.model_name,
+            "protocol": data.protocol,
             "firmware": client.firmware,
             "state": {
                 "available": client.available,

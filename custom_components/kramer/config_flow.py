@@ -48,8 +48,6 @@ from .const import (
     CONF_PRESET_DESCRIPTIONS,
     CONF_PRESET_SLOTS,
     DEFAULT_MACHINE,
-    DEFAULT_PORT,
-    DEFAULT_VP729_PORT,
     DOMAIN,
     SOURCE_MIXED,
     SOURCE_OFF,
@@ -62,7 +60,9 @@ from .models import (
     OTHER,
     VP729_KEY,
     VP729_NAME,
+    default_port_for,
     is_vp729,
+    model_choices,
     resolve_model_key,
     resolve_notes,
     resolve_preset_slots,
@@ -90,9 +90,7 @@ def _number(minimum: int, maximum: int) -> NumberSelector:
 
 
 def _model_selector() -> SelectSelector:
-    options = [{"value": k, "label": m.name} for k, m in MODELS.items()]
-    options.append({"value": VP729_KEY, "label": "VP-729 presentation scaler/switcher (Ethernet)"})
-    options.append({"value": OTHER, "label": "Other (Protocol 2000 switchers only)"})
+    options = [{"value": key, "label": label} for key, label in model_choices()]
     return SelectSelector(SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN))
 
 
@@ -104,6 +102,8 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialise."""
         self._data: dict[str, Any] = {}
+        self._model: str | None = None
+        self._carried: dict[str, str] = {}
 
     # -- helpers --------------------------------------------------------
 
@@ -154,62 +154,27 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
     # -- steps ----------------------------------------------------------
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """First screen: connection details and model."""
+        """First screen: which model it is. The address comes next."""
         errors: dict[str, str] = {}
         cur = self._current()
         if user_input is not None:
-            previous = self._data
-            self._data = {
-                CONF_NAME: user_input[CONF_NAME].strip(),
-                CONF_HOST: user_input[CONF_HOST].strip(),
-                CONF_PORT: int(user_input[CONF_PORT]),
-                CONF_MACHINE: int(user_input[CONF_MACHINE]),
-            }
             model = user_input[CONF_MODEL]
             if self.source == "reconfigure" and (model == VP729_KEY) != is_vp729(self._get_reconfigure_entry().data):
                 # A VP-729 and a matrix switcher are different kinds of unit: add a new entry instead.
                 errors["base"] = "type_change"
-                return self._user_form({**cur, **user_input}, errors)
-            if model == VP729_KEY:
-                return await self.async_step_vp729()
-            if model == OTHER:
-                if previous.get(CONF_MODEL) == OTHER:  # back from a failed test: keep the second screen's values
-                    for key in (CONF_MODEL_NAME, CONF_INPUTS, CONF_OUTPUTS, CONF_MODES, CONF_PRESET_SLOTS):
-                        if key in previous:
-                            self._data[key] = previous[key]
-                return await self.async_step_other()
-            m = MODELS[model]
-            self._data.update(
-                {
-                    CONF_MODEL: m.key,
-                    CONF_MODEL_NAME: m.name,
-                    CONF_INPUTS: m.inputs,
-                    CONF_OUTPUTS: m.outputs,
-                    CONF_MODES: m.supports_modes,
-                }
-            )
-            if (result := await self._finish(errors)) is not None:
-                return result
+                return self._model_form({**cur, CONF_MODEL: model}, errors)
+            if model != self._model:
+                self._data = {}  # a different model: start the next screens afresh
+            self._model = model
+            return await self.async_step_connection()
+        return self._model_form(cur, errors)
 
-        if user_input is not None:  # an error: keep what was typed
-            cur = {**cur, **user_input}
-        return self._user_form(cur, errors)
-
-    def _user_form(self, cur: dict[str, Any], errors: dict[str, str]) -> ConfigFlowResult:
-        """Show the first screen with these values filled in."""
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_NAME, default=cur.get(CONF_NAME, "Kramer Matrix")): TextSelector(),
-                vol.Required(CONF_HOST, default=cur.get(CONF_HOST, "")): TextSelector(),
-                vol.Required(CONF_PORT, default=int(cur.get(CONF_PORT, DEFAULT_PORT))): _number(1, 65535),
-                vol.Required(CONF_MACHINE, default=int(cur.get(CONF_MACHINE, DEFAULT_MACHINE))): _number(1, 15),
-                vol.Required(
-                    CONF_MODEL,
-                    default=resolve_model_key(cur.get(CONF_MODEL))
-                    or (cur[CONF_MODEL] if cur.get(CONF_MODEL) in (OTHER, VP729_KEY) else next(iter(MODELS))),
-                ): _model_selector(),
-            }
-        )
+    def _model_form(self, cur: dict[str, Any], errors: dict[str, str]) -> ConfigFlowResult:
+        """Show the model screen."""
+        choices = [key for key, _ in model_choices()]
+        current = cur.get(CONF_MODEL)
+        default = resolve_model_key(current) or (current if current in (OTHER, VP729_KEY) else choices[0])
+        schema = vol.Schema({vol.Required(CONF_MODEL, default=default): _model_selector()})
         step = "reconfigure" if self.source == "reconfigure" else "user"
         return self.async_show_form(step_id=step, data_schema=schema, errors=errors)
 
@@ -217,30 +182,70 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         """Show the setup screens, pre-filled."""
         return await self.async_step_user(user_input)
 
-    async def async_step_vp729(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Second screen for a VP-729: its Ethernet port (5000 unless changed on the unit's network module)."""
-        errors: dict[str, str] = {}
+    async def async_step_connection(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Second screen: name and address (and machine number for a matrix switcher)."""
+        errors: dict[str, str] = self._carried
+        self._carried = {}
         cur = self._current()
-        was_vp729 = cur.get(CONF_MODEL) == VP729_KEY
+        model = self._model or VP729_KEY
+        vp729 = model == VP729_KEY
         if user_input is not None:
             self._data.update(
                 {
-                    CONF_MODEL: VP729_KEY,
-                    CONF_MODEL_NAME: VP729_NAME,
+                    CONF_NAME: user_input[CONF_NAME].strip(),
+                    CONF_HOST: user_input[CONF_HOST].strip(),
                     CONF_PORT: int(user_input[CONF_PORT]),
                 }
             )
-            self._data.pop(CONF_MACHINE, None)
+            if vp729:
+                self._data.pop(CONF_MACHINE, None)
+                self._data.update({CONF_MODEL: VP729_KEY, CONF_MODEL_NAME: VP729_NAME})
+            else:
+                self._data[CONF_MACHINE] = int(user_input[CONF_MACHINE])
+                if model == OTHER:
+                    return await self.async_step_other()
+                else:
+                    m = MODELS[model]
+                    self._data.update(
+                        {
+                            CONF_MODEL: m.key,
+                            CONF_MODEL_NAME: m.name,
+                            CONF_INPUTS: m.inputs,
+                            CONF_OUTPUTS: m.outputs,
+                            CONF_MODES: m.supports_modes,
+                        }
+                    )
             if (result := await self._finish(errors)) is not None:
                 return result
-            return self._user_form({**self._current(), CONF_MODEL: VP729_KEY}, errors)
+            cur = {**cur, **user_input}  # an error: keep what was typed
 
-        port = int(cur[CONF_PORT]) if was_vp729 and CONF_PORT in cur else DEFAULT_VP729_PORT
-        schema = vol.Schema({vol.Required(CONF_PORT, default=port): _number(1, 65535)})
-        return self.async_show_form(step_id="vp729", data_schema=schema, errors=errors)
+        label = dict(model_choices())[model]
+        # Keep a saved port when the unit is being reconfigured as the same kind of unit.
+        saved = self._get_reconfigure_entry().data if self.source == "reconfigure" else {}
+        same_kind = bool(saved) and is_vp729(saved) == vp729
+        port = int(cur[CONF_PORT]) if CONF_PORT in cur and (same_kind or self._data.get(CONF_PORT)) else default_port_for(model)
+        fields: dict[Any, Any] = {
+            vol.Required(CONF_NAME, default=cur.get(CONF_NAME, "Kramer VP-729" if vp729 else "Kramer Matrix")): TextSelector(),
+            vol.Required(CONF_HOST, default=cur.get(CONF_HOST, "")): TextSelector(),
+            vol.Required(CONF_PORT, default=port): _number(1, 65535),
+        }
+        if not vp729:
+            fields[vol.Required(CONF_MACHINE, default=int(cur.get(CONF_MACHINE, DEFAULT_MACHINE)))] = _number(1, 15)
+        note = (
+            "Its Ethernet port is 5000 unless changed on the unit's network module, and \"Password Required\" "
+            "on that port must be set to No."
+            if vp729
+            else "The machine number is 1 unless units are daisy-chained."
+        )
+        return self.async_show_form(
+            step_id="connection",
+            data_schema=vol.Schema(fields),
+            errors=errors,
+            description_placeholders={"model": label, "note": note},
+        )
 
     async def async_step_other(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Second screen for models not in the library."""
+        """Third screen for models not in the library."""
         errors: dict[str, str] = {}
         cur = self._current()
         if user_input is not None:
@@ -256,12 +261,11 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             if (result := await self._finish(errors)) is not None:
                 return result
-            # The connection details are on the first screen, so go back there with
+            # The connection details are on the previous screen, so go back there with
             # the error and everything typed so far (on both screens) kept.
-            return self._user_form(self._current(), errors)
+            self._carried = errors
+            return await self.async_step_connection()
 
-        if user_input is not None:  # an error: keep what was typed
-            cur = {**cur, **user_input}
         schema = vol.Schema(
             {
                 vol.Required(CONF_MODEL_NAME, default=cur.get(CONF_MODEL_NAME, "")): TextSelector(),

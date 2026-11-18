@@ -18,6 +18,11 @@ KIND_SWITCH = "switch"
 KIND_BUTTON = "button"
 KIND_SENSOR = "sensor"
 
+POWER_FN = 91
+RESOLUTION_FN = 25
+# Power on: acknowledged at once, then silent for about 8 seconds.
+POWER_ON_SETTLE_SECONDS = 10.0
+
 # Errors from the unit that mean "not available at the moment / on this input".
 UNAVAILABLE_ERRORS = (2, 3, 7)
 
@@ -40,6 +45,7 @@ class Control:
     diagnostic: bool = False
     icon: str | None = None
     unit: str | None = None
+    step: int = 1
     note: str = ""
 
     @property
@@ -257,12 +263,12 @@ CONTROLS: tuple[Control, ...] = (
             10: "400%",
             11: "Custom",
         },
-        depends_on=(27,),
+        depends_on=(27, 36),
         icon="mdi:magnify-plus-outline",
     ),
     Control(33, "custom_zoom", "Custom zoom", KIND_NUMBER, minimum=0, maximum=32, depends_on=(27, 32)),
-    Control(34, "zoom_h_pan", "Zoom H-pan", KIND_NUMBER, minimum=0, maximum=31, depends_on=(27, 32, 33)),
-    Control(35, "zoom_v_pan", "Zoom V-pan", KIND_NUMBER, minimum=0, maximum=31, depends_on=(27, 32, 33)),
+    Control(34, "zoom_h_pan", "Zoom H-pan", KIND_NUMBER, minimum=0, maximum=32, depends_on=(27, 32, 33)),
+    Control(35, "zoom_v_pan", "Zoom V-pan", KIND_NUMBER, minimum=0, maximum=32, depends_on=(27, 32, 33)),
     # --- Picture in picture ----------------------------------------------------
     _on_off(36, "pip", "Picture in picture", icon="mdi:picture-in-picture-bottom-right"),
     Control(37, "pip_type", "PIP type", KIND_SELECT, {0: "Picture-in-picture", 1: "Picture + picture", 2: "Split"}, depends_on=(36,)),
@@ -270,8 +276,8 @@ CONTROLS: tuple[Control, ...] = (
     Control(39, "pip_size", "PIP size", KIND_SELECT, {0: "1/25", 1: "1/16", 2: "1/9", 3: "1/4", 4: "Custom"}, depends_on=(36,)),
     Control(40, "pip_h_position", "PIP H-position", KIND_NUMBER, minimum=0, maximum=128, depends_on=(36, 39)),
     Control(41, "pip_v_position", "PIP V-position", KIND_NUMBER, minimum=0, maximum=128, depends_on=(36, 39)),
-    Control(42, "pip_h_size", "PIP H-size", KIND_NUMBER, minimum=1, maximum=256, depends_on=(36, 39)),
-    Control(43, "pip_v_size", "PIP V-size", KIND_NUMBER, minimum=1, maximum=256, depends_on=(36, 39)),
+    Control(42, "pip_h_size", "PIP H-size", KIND_NUMBER, minimum=1, maximum=255, depends_on=(36, 39)),
+    Control(43, "pip_v_size", "PIP V-size", KIND_NUMBER, minimum=1, maximum=255, depends_on=(36, 39)),
     _on_off(44, "pip_frame", "PIP frame", depends_on=(36,)),
     Control(45, "pip_frame_colour", "PIP frame colour", KIND_SELECT, {0: "Red", 1: "Green", 2: "Blue"}, depends_on=(36,)),
     # --- Audio -----------------------------------------------------------------
@@ -286,11 +292,14 @@ CONTROLS: tuple[Control, ...] = (
     Control(
         54,
         "user_delay",
-        "User audio delay (2 ms steps)",
-        KIND_SENSOR,
-        writable=False,
+        "User audio delay",
+        KIND_NUMBER,
+        minimum=0,
+        maximum=340,
         depends_on=(53,),
-        note="0 to 340, read only; needs the audio delay mode set to User defined",
+        unit="ms",
+        step=2,
+        note="0 to 340 ms in 2 ms steps (an odd value is rounded up by the unit); needs Audio delay mode set to User defined",
     ),
     Control(
         55,
@@ -304,14 +313,14 @@ CONTROLS: tuple[Control, ...] = (
     Control(57, "geometry_location", "Geometry location", KIND_SELECT, {0: "Front", 1: "Ceiling", 2: "Rear", 3: "Rear ceiling"}),
     Control(58, "h_keystone", "Horizontal keystone", KIND_NUMBER, minimum=-40, maximum=40),
     Control(59, "v_keystone", "Vertical keystone", KIND_NUMBER, minimum=-30, maximum=30),
-    Control(60, "top_left_h", "Top left H", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
-    Control(61, "top_left_v", "Top left V", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
-    Control(62, "top_right_h", "Top right H", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
-    Control(63, "top_right_v", "Top right V", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
-    Control(64, "bottom_left_h", "Bottom left H", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
-    Control(65, "bottom_left_v", "Bottom left V", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
-    Control(66, "bottom_right_h", "Bottom right H", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
-    Control(67, "bottom_right_v", "Bottom right V", KIND_NUMBER, minimum=-2000, maximum=2000, depends_on=(56,)),
+    Control(60, "top_left_h", "Top left H", KIND_NUMBER, minimum=0, maximum=1000, depends_on=(56,)),
+    Control(61, "top_left_v", "Top left V", KIND_NUMBER, minimum=0, maximum=1000, depends_on=(56,)),
+    Control(62, "top_right_h", "Top right H", KIND_NUMBER, minimum=-1000, maximum=0, depends_on=(56,)),
+    Control(63, "top_right_v", "Top right V", KIND_NUMBER, minimum=0, maximum=1000, depends_on=(56,)),
+    Control(64, "bottom_left_h", "Bottom left H", KIND_NUMBER, minimum=0, maximum=1000, depends_on=(56,)),
+    Control(65, "bottom_left_v", "Bottom left V", KIND_NUMBER, minimum=-1000, maximum=0, depends_on=(56,)),
+    Control(66, "bottom_right_h", "Bottom right H", KIND_NUMBER, minimum=-1000, maximum=0, depends_on=(56,)),
+    Control(67, "bottom_right_v", "Bottom right V", KIND_NUMBER, minimum=-1000, maximum=0, depends_on=(56,)),
     Control(69, "pincushion_barrel", "Pincushion/barrel", KIND_NUMBER, minimum=-20, maximum=20),
     Control(70, "rotation", "Rotation", KIND_NUMBER, minimum=-180, maximum=180, depends_on=(56,)),
     # --- Set-up and display ----------------------------------------------------
@@ -336,21 +345,13 @@ CONTROLS: tuple[Control, ...] = (
     Control(81, "logo", "Logo", KIND_SELECT, {0: "Off", 1: "On", 2: "Custom"}),
     Control(82, "blank_colour", "Blank colour", KIND_SELECT, {0: "Black", 1: "Blue"}),
     Control(84, "background", "Background", KIND_SELECT, {0: "Black", 1: "Blue", 2: "Custom", 3: "Disable analogue sync"}),
-    Control(
-        85,
-        "save_lock",
-        "Save lock",
-        KIND_SENSOR,
-        {0: "Off", 1: "On"},
-        writable=False,
-        note="Read only until writing it has been tested on a real unit",
-    ),
+    _on_off(85, "save_lock", "Save lock", icon="mdi:lock-outline"),
     _on_off(86, "input_lock", "Input lock"),
     Control(87, "blank_key", "Blank key function", KIND_SELECT, {0: "Blank and mute", 1: "Blank", 2: "Mute"}),
     Control(88, "freeze_key", "Freeze key function", KIND_SELECT, {0: "Freeze and mute", 1: "Freeze", 2: "Mute"}),
     _on_off(89, "freeze", "Freeze", icon="mdi:snowflake"),
     _on_off(90, "blank", "Blank", icon="mdi:monitor-off"),
-    _on_off(91, "power", "Power", settle=12.0, icon="mdi:power"),
+    _on_off(91, "power", "Power (standby)", settle=POWER_ON_SETTLE_SECONDS, icon="mdi:power"),
     _on_off(101, "mute", "Mute", icon="mdi:volume-off"),
     _on_off(102, "front_panel_lock", "Front panel lock", icon="mdi:lock"),
     # --- Input status (read only) ----------------------------------------------
@@ -386,7 +387,7 @@ CONTROLS: tuple[Control, ...] = (
     Control(83, "capture", "Capture", KIND_BUTTON, icon="mdi:camera"),
     Control(92, "key_info", "Info", KIND_BUTTON, icon="mdi:information-outline"),
     Control(93, "key_menu", "Menu", KIND_BUTTON, icon="mdi:menu"),
-    Control(94, "key_top", "Top", KIND_BUTTON, icon="mdi:arrow-up-bold"),
+    Control(94, "key_top", "Up", KIND_BUTTON, icon="mdi:arrow-up-bold"),
     Control(95, "key_down", "Down", KIND_BUTTON, icon="mdi:arrow-down-bold"),
     Control(96, "key_left", "Left", KIND_BUTTON, icon="mdi:arrow-left-bold"),
     Control(97, "key_right", "Right", KIND_BUTTON, icon="mdi:arrow-right-bold"),
@@ -405,7 +406,11 @@ VOLUME_BUTTONS: tuple[tuple[str, str, int, str], ...] = (
 
 PROFILE_SAVE_FN = 72
 PROFILE_RECALL_FN = 73
-PROFILE_SETTLE_SECONDS = 12.0
+# Measured on a real unit: a save is acknowledged after about 9 seconds; a recall is
+# acknowledged at once and then the unit is silent for about 15 seconds.
+PROFILE_SAVE_TIMEOUT = 20.0
+PROFILE_SAVE_SETTLE_SECONDS = 1.0
+PROFILE_RECALL_SETTLE_SECONDS = 20.0
 PROFILE_COUNT = len(_PROFILES)
 
 BY_FN: dict[int, Control] = {control.fn: control for control in CONTROLS}
@@ -417,6 +422,161 @@ for _control in CONTROLS:
     for _dep in _control.depends_on:
         DEPENDENTS.setdefault(_dep, ())
         DEPENDENTS[_dep] = (*DEPENDENTS[_dep], _control.fn)
+
+
+# ---------------------------------------------------------------------------
+# Limits that depend on the output resolution (measured on a real unit)
+# ---------------------------------------------------------------------------
+
+_SD_480 = (720, 480)
+_SD_576 = (720, 576)
+_HD_720 = (1280, 720)
+_HD_1080 = (1920, 1080)
+
+# Output resolution (function 25) -> (width, height). Native HDMI and the custom
+# modes have no fixed size, so they are not listed.
+OUTPUT_SIZES: dict[int, tuple[int, int]] = {
+    1: (640, 480),
+    2: (640, 480),
+    3: (800, 600),
+    4: (800, 600),
+    5: (800, 600),
+    6: (1024, 768),
+    7: (1024, 768),
+    8: (1024, 768),
+    9: (1280, 768),
+    10: (1280, 768),
+    11: _HD_720,
+    12: (1280, 800),
+    13: (1280, 1024),
+    14: (1280, 1024),
+    15: (1280, 1024),
+    16: (1366, 768),
+    17: (1366, 768),
+    18: (1400, 1050),
+    19: (1400, 1050),
+    20: (1600, 1200),
+    21: (1600, 1200),
+    22: (1680, 1050),
+    23: _HD_1080,
+    24: (1920, 1200),
+    25: _SD_480,
+    26: _SD_576,
+    27: _HD_720,
+    28: _HD_720,
+    29: _HD_1080,
+    30: _HD_1080,
+    31: _HD_1080,
+    32: _HD_1080,
+    33: _SD_480,
+    34: _HD_720,
+    35: _HD_1080,
+    36: _HD_1080,
+    37: _HD_1080,
+    38: _HD_1080,
+}
+
+# Corner moves: the unit takes 0.45 of the output width (H corners) or height (V
+# corners), in one direction only, and silently ignores anything beyond that.
+# Measured at 1920x1080 (864 / 486), 1280x720 (576 / 324) and 1024x768 (461 / 346).
+CORNER_FRACTION = 0.45
+CORNER_H = (60, 62, 64, 66)
+CORNER_V = (61, 63, 65, 67)
+CORNER_NEGATIVE = (62, 65, 66, 67)
+CUSTOM_ZOOM_FN = 33
+CUSTOM_ZOOM_MAX_1080 = 21  # at 1920x1080 the unit stops at 21 (32 at 1280x720 and 1024x768)
+
+
+def limits(control: Control, resolution: int | str | None) -> tuple[int, int]:
+    """Return (minimum, maximum) for a number, allowing for the output resolution.
+
+    Resolutions that were not measured use the widest range the unit documents,
+    so a valid value is never blocked; the unit still decides.
+    """
+    low, high = control.minimum, control.maximum
+    size = OUTPUT_SIZES.get(resolution) if isinstance(resolution, int) else None
+    if size is None:
+        return low, high
+    if control.fn in CORNER_H or control.fn in CORNER_V:
+        edge = size[0] if control.fn in CORNER_H else size[1]
+        reach = int(CORNER_FRACTION * edge + 0.5)
+        return (-reach, 0) if control.fn in CORNER_NEGATIVE else (0, reach)
+    if control.fn == CUSTOM_ZOOM_FN and size == _HD_1080:
+        return low, CUSTOM_ZOOM_MAX_1080
+    return low, high
+
+
+# ---------------------------------------------------------------------------
+# Why a control is not available
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Requirement:
+    """A condition another function must meet before a control works."""
+
+    fn: int
+    values: tuple[int, ...]
+    equal: bool
+    text: str
+
+    def met(self, value: int | str | None) -> bool:
+        """Return whether the condition holds (an unknown value is not blamed)."""
+        if not isinstance(value, int):
+            return True
+        return (value in self.values) == self.equal
+
+
+_ASPECT_CUSTOM = Requirement(27, (5,), True, "Aspect ratio set to Custom")
+_ZOOM_CUSTOM = Requirement(32, (11,), True, "Zoom set to Custom")
+_PIP_ON = Requirement(36, (1,), True, "Picture in picture on")
+_PIP_OFF = Requirement(36, (0,), True, "Picture in picture off")
+_PIP_CUSTOM = Requirement(39, (4,), True, "PIP size set to Custom")
+
+REQUIREMENTS: dict[int, tuple[Requirement, ...]] = {
+    28: (_ASPECT_CUSTOM, Requirement(30, (0,), False, "H-zoom other than 0")),
+    29: (_ASPECT_CUSTOM, Requirement(31, (0,), False, "V-zoom other than 0")),
+    30: (_ASPECT_CUSTOM,),
+    31: (_ASPECT_CUSTOM,),
+    32: (Requirement(27, (5,), False, "Aspect ratio not set to Custom"), _PIP_OFF),
+    33: (_ZOOM_CUSTOM,),
+    34: (_ZOOM_CUSTOM, Requirement(33, (0,), False, "Custom zoom above 0")),
+    35: (_ZOOM_CUSTOM, Requirement(33, (0,), False, "Custom zoom above 0")),
+    37: (_PIP_ON,),
+    39: (_PIP_ON,),
+    40: (_PIP_ON, _PIP_CUSTOM),
+    41: (_PIP_ON, _PIP_CUSTOM),
+    42: (_PIP_ON, _PIP_CUSTOM),
+    43: (_PIP_ON, _PIP_CUSTOM),
+    44: (_PIP_ON,),
+    45: (_PIP_ON,),
+    54: (Requirement(53, (1,), True, "Audio delay mode set to User defined"),),
+    60: (Requirement(56, (1,), True, "Geometry application set to Anyplace"),),
+    70: (Requirement(56, (2,), True, "Geometry application set to Rotation"),),
+    83: (_PIP_OFF,),
+}
+for _fn in (61, 62, 63, 64, 65, 66, 67):
+    REQUIREMENTS[_fn] = REQUIREMENTS[60]
+
+# Things the unit refuses on some inputs, whatever else is set.
+INPUT_DEPENDENT_FNS = (5, 6, 7, 8, 9, 10, 11)
+STANDBY_REASON = "The unit is in standby"
+
+
+def unavailable_reason(fn: int, values: dict[int, int | str | None]) -> str | None:
+    """Say why a function cannot be used now, or None if nothing is known to be missing."""
+    if fn != POWER_FN and values.get(POWER_FN) == 0:
+        return STANDBY_REASON
+    unmet = [req.text for req in REQUIREMENTS.get(fn, ()) if not req.met(values.get(req.fn))]
+    if fn == 83:
+        size = OUTPUT_SIZES.get(values.get(RESOLUTION_FN)) if isinstance(values.get(RESOLUTION_FN), int) else None
+        if size and size[0] >= 1400:
+            unmet.append("an output resolution under 1400 pixels wide")
+    if unmet:
+        return "Needs " + " and ".join(unmet)
+    if fn in INPUT_DEPENDENT_FNS:
+        return "Not available for the selected input"
+    return None
 
 
 def label(control: Control, value: int | str | None) -> str | None:

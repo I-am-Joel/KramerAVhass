@@ -22,11 +22,15 @@ from .vp729_defs import (
     KIND_SWITCH,
     PROFILE_COUNT,
     PROFILE_RECALL_FN,
+    PROFILE_RECALL_SETTLE_SECONDS,
     PROFILE_SAVE_FN,
-    PROFILE_SETTLE_SECONDS,
+    PROFILE_SAVE_SETTLE_SECONDS,
+    PROFILE_SAVE_TIMEOUT,
+    RESOLUTION_FN,
     VOLUME_BUTTONS,
     Control,
     label,
+    limits,
 )
 
 STATUS_SCHEMA_VERSION = 1
@@ -75,13 +79,23 @@ class Vp729Number(Vp729Entity, NumberEntity):
     """A setting with a numeric range."""
 
     _attr_mode = NumberMode.BOX
-    _attr_native_step = 1
 
     def __init__(self, entry: KramerConfigEntry, control: Control) -> None:
         """Initialise."""
         super().__init__(entry, control)
-        self._attr_native_min_value = control.minimum
-        self._attr_native_max_value = control.maximum
+        self._attr_native_step = control.step
+        if control.unit:
+            self._attr_native_unit_of_measurement = control.unit
+
+    @property
+    def native_min_value(self) -> float:
+        """Return the lowest value, which for some settings depends on the output resolution."""
+        return limits(self._control, self._client.value(RESOLUTION_FN))[0]
+
+    @property
+    def native_max_value(self) -> float:
+        """Return the highest value, which for some settings depends on the output resolution."""
+        return limits(self._control, self._client.value(RESOLUTION_FN))[1]
 
     @property
     def native_value(self) -> float | None:
@@ -136,6 +150,8 @@ class Vp729Button(KramerEntity, ButtonEntity):
         value: int | None,
         icon: str | None,
         settle: float = 0.0,
+        timeout: float | None = None,
+        profile: bool = False,
     ) -> None:
         """Initialise."""
         super().__init__(entry, key)
@@ -145,10 +161,23 @@ class Vp729Button(KramerEntity, ButtonEntity):
         self._fn = fn
         self._value = value
         self._settle = settle
+        self._timeout = timeout
+        self._profile = profile
+
+    @property
+    def available(self) -> bool:
+        """Profile buttons are greyed out while the unit is saving, recalling or settling."""
+        if self._profile and self._client.busy:
+            return False
+        return super().available
 
     async def async_press(self) -> None:
         """Send the key press."""
-        await self._call(self._client.async_press(self._fn, self._value, settle=self._settle))
+        await self._call(
+            self._client.async_press(
+                self._fn, self._value, settle=self._settle, timeout=self._timeout, busy=self._profile
+            )
+        )
 
 
 class Vp729StatusSensor(KramerEntity, SensorEntity):
@@ -205,17 +234,23 @@ class Vp729StatusSensor(KramerEntity, SensorEntity):
         client = self._client
         online = client.available
         settings: dict[str, str | int | None] = {}
+        reasons: dict[str, str] = {}
         if online:
             for control in CONTROLS:
                 if control.readable and client.function_available(control.fn) and not control.diagnostic:
                     settings[control.key] = label(control, client.value(control.fn)) if control.options else client.value(control.fn)
+                elif (reason := client.reason_unavailable(control.fn)) and not control.diagnostic:
+                    reasons[control.key] = reason
         return {
             "schema_version": STATUS_SCHEMA_VERSION,
             "name": self._title,
             "model": self._data.model_name,
+            "protocol": self._data.protocol,
+            "standby": client.standby,
             "device_type": "presentation_scaler",
             "firmware": client.firmware,
             "settings": settings,
+            "unavailable_reasons": reasons,
             "last_error": {
                 "message": client.last_error,
                 "time": client.last_error_time.isoformat() if client.last_error_time else None,
@@ -240,7 +275,17 @@ def build(entry: KramerConfigEntry, kind: str) -> list[KramerEntity]:
         entities += [Vp729Button(entry, key, name, 48, value, icon) for key, name, value, icon in VOLUME_BUTTONS]
         for slot in range(PROFILE_COUNT):
             entities.append(
-                Vp729Button(entry, f"save_profile_{slot + 1}", f"Save profile {slot + 1}", PROFILE_SAVE_FN, slot, "mdi:content-save")
+                Vp729Button(
+                    entry,
+                    f"save_profile_{slot + 1}",
+                    f"Save profile {slot + 1}",
+                    PROFILE_SAVE_FN,
+                    slot,
+                    "mdi:content-save",
+                    settle=PROFILE_SAVE_SETTLE_SECONDS,
+                    timeout=PROFILE_SAVE_TIMEOUT,
+                    profile=True,
+                )
             )
             entities.append(
                 Vp729Button(
@@ -250,7 +295,8 @@ def build(entry: KramerConfigEntry, kind: str) -> list[KramerEntity]:
                     PROFILE_RECALL_FN,
                     slot,
                     "mdi:backup-restore",
-                    PROFILE_SETTLE_SECONDS,
+                    settle=PROFILE_RECALL_SETTLE_SECONDS,
+                    profile=True,
                 )
             )
         return entities

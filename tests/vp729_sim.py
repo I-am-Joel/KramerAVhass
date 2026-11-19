@@ -9,12 +9,14 @@ ignores it, and pushes "Z 0 <fn> <value>" when a value changes on its own.
 from __future__ import annotations
 
 import asyncio
+import time
 
 from custom_components.kramer.vp729_defs import (
     BY_FN,
     CONTROLS,
     PROFILE_RECALL_FN,
     PROFILE_SAVE_FN,
+    limits,
 )
 
 FIRMWARE = "VTB 1.26h    Audio 2.30"
@@ -46,6 +48,15 @@ class Vp729Sim:
         self.log: list[str] = []
         self.silent_for = 0.0
         self.garble_next = False
+        self.lag = 0.0  # seconds before an accepted value shows in a read
+        self.save_delay = 0.0  # seconds before a profile save is acknowledged
+        self.recall_silence = 0.0  # seconds of silence after a profile recall
+        self.mute_until = 0.0
+        self.pending_values: dict[int, tuple[float, int]] = {}
+        self.dropped: list[str] = []
+        self.min_gap = 0.0  # a command this soon after the last is garbled, as the real unit does
+        self.last_command_time = 0.0
+        self.too_fast = 0  # commands that arrived before the previous prompt was sent
         self.server: asyncio.AbstractServer | None = None
         self._writers: list[asyncio.StreamWriter] = []
         self.port = 0
@@ -69,6 +80,8 @@ class Vp729Sim:
     def available(self, fn: int) -> bool:
         """Return whether a function can be read or set in the current state."""
         s = self.state
+        if fn == 27 and s[36] == 1 and s[37] in (1, 2):
+            return False
         if fn in (30, 31):
             return s[27] == 5
         if fn == 28:
@@ -76,15 +89,25 @@ class Vp729Sim:
         if fn == 29:
             return s[27] == 5 and s[31] != 0
         if fn == 32:
-            return s[27] != 5
+            return s[27] != 5 and s[36] == 0
         if fn == 33:
             return s[32] == 11
         if fn in (34, 35):
             return s[32] == 11 and s[33] > 0
-        if fn in (37, 39, 44, 45):
+        if fn == 36:
+            return s[32] == 0
+        if fn in (37, 44):
             return s[36] == 1
-        if fn in (40, 41, 42, 43):
-            return s[36] == 1 and s[39] == 4
+        if fn == 39:
+            return s[36] == 1 and s[37] == 0
+        if fn in (40, 41):
+            return s[36] == 1 and s[37] == 0
+        if fn == 42:
+            return s[36] == 1 and (s[37] != 0 or s[39] == 4)
+        if fn == 43:
+            return s[36] == 1 and s[37] == 0 and s[39] == 4
+        if fn == 45:
+            return s[36] == 1 and s[44] == 1
         if fn == 54:
             return s[53] == 1
         if 60 <= fn <= 67:
@@ -98,7 +121,8 @@ class Vp729Sim:
         control = BY_FN[fn]
         if control.options is not None:
             return value in control.options
-        return control.minimum <= value <= control.maximum
+        low, high = limits(control, self.state.get(25))
+        return low <= value <= high
 
     # ---- connection -----------------------------------------------------------------
 
@@ -114,11 +138,26 @@ class Vp729Sim:
             while True:
                 raw = await reader.readuntil(b"\r")
                 line = raw.decode().strip()
+                if time.monotonic() < self.mute_until:
+                    self.dropped.append(line)  # the unit is busy: no echo, no reply
+                    continue
                 if self.silent_for:
                     await asyncio.sleep(self.silent_for)
+                now = time.monotonic()
+                if self.min_gap and now - self.last_command_time < self.min_gap:
+                    self.last_command_time = now
+                    self.too_fast += 1
+                    self.log.append(line)
+                    writer.write(b"ERR 1\r\n>")
+                    await writer.drain()
+                    continue
+                self.last_command_time = now
                 self.log.append(line)
                 writer.write(f"{line}\r\n".encode())  # the echo
-                writer.write(self._answer(line).encode())
+                answer = self._answer(line)
+                if self.save_delay and line.startswith(f"Y 0 {PROFILE_SAVE_FN} "):
+                    await asyncio.sleep(self.save_delay)
+                writer.write(answer.encode())
                 await writer.drain()
         except (asyncio.IncompleteReadError, ConnectionError):
             pass
@@ -140,7 +179,11 @@ class Vp729Sim:
             return "ERR 1\r\n>"
         value = int(parts[3]) if len(parts) > 3 else None
         if setting and fn in (PROFILE_SAVE_FN, PROFILE_RECALL_FN):
+            if fn == PROFILE_RECALL_FN and self.recall_silence:
+                self.mute_until = time.monotonic() + self.recall_silence
             return f"Z 0 {fn} {value}\r\n>"
+        if self.state.get(91) == 0 and fn != 91 and fn in BY_FN:
+            return "ERR 1\r\n>"  # in standby only the power function answers
         control = BY_FN.get(fn)
         if control is None:
             return "ERR 2\r\n>"
@@ -149,6 +192,10 @@ class Vp729Sim:
                 return "ERR 5\r\n>"
             if not self.available(fn):
                 return "ERR 3\r\n>"
+            due = self.pending_values.get(fn)
+            if due and time.monotonic() >= due[0]:
+                self.state[fn] = due[1]
+                del self.pending_values[fn]
             return f"Z 1 {fn} {self.state[fn]}\r\n>"
         if not control.writable:
             return "ERR 6\r\n>"
@@ -161,5 +208,10 @@ class Vp729Sim:
         if fn == 48 and value in (111, -111):
             self.state[48] = max(-100, min(24, self.state[48] + (1 if value > 0 else -1)))
         elif self.in_range(fn, value):
-            self.state[fn] = value
+            if fn == 54 and value % 2:
+                value += 1  # the unit works in 2 ms steps
+            if self.lag:
+                self.pending_values[fn] = (time.monotonic() + self.lag, value)
+            else:
+                self.state[fn] = value
         return f"Z 0 {fn} {value}\r\n>"

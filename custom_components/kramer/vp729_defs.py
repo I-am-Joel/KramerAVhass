@@ -192,6 +192,8 @@ _SOURCES = {
 _INPUT_TYPES = {0: "Component", 1: "YC", 2: "Video"}
 _POLARITY = {0: "Negative", 1: "Positive"}
 _PROFILES = range(1, 9)
+# Input source (0) and the four source types (1 to 4) decide which input controls exist.
+_SOURCE_DEPS = (0, 1, 2, 3, 4)
 
 CONTROLS: tuple[Control, ...] = (
     # --- Input ---------------------------------------------------------------
@@ -200,34 +202,34 @@ CONTROLS: tuple[Control, ...] = (
     Control(2, "input_2_type", "Input 2 source type", KIND_SELECT, _INPUT_TYPES),
     Control(3, "input_3_type", "Input 3 source type", KIND_SELECT, _INPUT_TYPES),
     Control(4, "input_4_type", "Input 4 source type", KIND_SELECT, _INPUT_TYPES),
-    Control(5, "input_colour_format", "Input colour format", KIND_SELECT, {0: "Auto", 1: "RGB", 2: "YUV"}, depends_on=(0,)),
+    Control(5, "input_colour_format", "Input colour format", KIND_SELECT, {0: "Auto", 1: "RGB", 2: "YUV"}, depends_on=_SOURCE_DEPS),
     Control(
         6,
         "input_video_standard",
         "Input video standard",
         KIND_SELECT,
         {0: "Auto", 1: "NTSC", 2: "PAL", 3: "PAL-M", 4: "PAL-N", 5: "NTSC 4.43", 6: "SECAM", 7: "PAL-60"},
-        depends_on=(0,),
+        depends_on=_SOURCE_DEPS,
     ),
-    Control(7, "input_h_position", "Input H-position", KIND_NUMBER, minimum=1, maximum=50, depends_on=(0,)),
-    Control(8, "input_v_position", "Input V-position", KIND_NUMBER, minimum=2, maximum=50, depends_on=(0,)),
-    Control(9, "input_frequency", "Input frequency", KIND_NUMBER, minimum=0, maximum=50, depends_on=(0,)),
-    Control(10, "input_phase", "Input phase", KIND_NUMBER, minimum=0, maximum=31, depends_on=(0,)),
+    Control(7, "input_h_position", "Input H-position", KIND_NUMBER, minimum=1, maximum=50, depends_on=_SOURCE_DEPS),
+    Control(8, "input_v_position", "Input V-position", KIND_NUMBER, minimum=2, maximum=50, depends_on=_SOURCE_DEPS),
+    Control(9, "input_frequency", "Input frequency", KIND_NUMBER, minimum=0, maximum=50, depends_on=_SOURCE_DEPS),
+    Control(10, "input_phase", "Input phase", KIND_NUMBER, minimum=0, maximum=31, depends_on=_SOURCE_DEPS),
     Control(11, "auto_image", "Auto image", KIND_BUTTON, icon="mdi:auto-fix"),
     # --- Picture -------------------------------------------------------------
-    Control(12, "brightness", "Brightness", KIND_NUMBER, minimum=0, maximum=100),
-    Control(13, "contrast", "Contrast", KIND_NUMBER, minimum=0, maximum=100),
-    Control(14, "colour", "Colour", KIND_NUMBER, minimum=0, maximum=100),
-    Control(15, "hue", "Hue", KIND_NUMBER, minimum=0, maximum=360),
-    Control(16, "sharpness", "Sharpness", KIND_NUMBER, minimum=0, maximum=100),
-    Control(17, "gamma", "Output gamma", KIND_SELECT, {0: "Gamma 1", 1: "Gamma 2", 2: "Gamma 3", 3: "Gamma 4", 4: "Gamma 5"}),
-    Control(18, "film_mode", "Film mode", KIND_SELECT, {0: "Auto", 1: "Video", 2: "Film"}),
-    Control(19, "temporal_nr", "Temporal noise reduction", KIND_SELECT, _LEVEL4),
-    Control(20, "mosquito_nr", "Mosquito noise reduction", KIND_SELECT, _LEVEL4),
-    _on_off(21, "block_nr", "Block noise reduction"),
-    Control(22, "detail_enhancement", "Detail enhancement", KIND_SELECT, _LEVEL4),
-    Control(23, "luma_transition", "Luma transition enhancement", KIND_SELECT, _LEVEL3),
-    Control(24, "chroma_transition", "Chroma transition enhancement", KIND_SELECT, _LEVEL3),
+    Control(12, "brightness", "Brightness", KIND_NUMBER, minimum=0, maximum=100, depends_on=_SOURCE_DEPS),
+    Control(13, "contrast", "Contrast", KIND_NUMBER, minimum=0, maximum=100, depends_on=_SOURCE_DEPS),
+    Control(14, "colour", "Colour", KIND_NUMBER, minimum=0, maximum=100, depends_on=_SOURCE_DEPS),
+    Control(15, "hue", "Hue", KIND_NUMBER, minimum=0, maximum=360, depends_on=_SOURCE_DEPS),
+    Control(16, "sharpness", "Sharpness", KIND_NUMBER, minimum=0, maximum=100, depends_on=_SOURCE_DEPS),
+    Control(17, "gamma", "Output gamma", KIND_SELECT, {0: "Gamma 1", 1: "Gamma 2", 2: "Gamma 3", 3: "Gamma 4", 4: "Gamma 5"}, depends_on=_SOURCE_DEPS),
+    Control(18, "film_mode", "Film mode", KIND_SELECT, {0: "Auto", 1: "Video", 2: "Film"}, depends_on=_SOURCE_DEPS),
+    Control(19, "temporal_nr", "Temporal noise reduction", KIND_SELECT, _LEVEL4, depends_on=_SOURCE_DEPS),
+    Control(20, "mosquito_nr", "Mosquito noise reduction", KIND_SELECT, _LEVEL4, depends_on=_SOURCE_DEPS),
+    _on_off(21, "block_nr", "Block noise reduction", depends_on=_SOURCE_DEPS),
+    Control(22, "detail_enhancement", "Detail enhancement", KIND_SELECT, _LEVEL4, depends_on=_SOURCE_DEPS),
+    Control(23, "luma_transition", "Luma transition enhancement", KIND_SELECT, _LEVEL3, depends_on=_SOURCE_DEPS),
+    Control(24, "chroma_transition", "Chroma transition enhancement", KIND_SELECT, _LEVEL3, depends_on=_SOURCE_DEPS),
     # --- Output --------------------------------------------------------------
     Control(25, "output_resolution", "Output resolution", KIND_SELECT, OUTPUT_RESOLUTIONS, icon="mdi:monitor"),
     Control(26, "hdmi_type", "Output HDMI type", KIND_SELECT, {0: "Auto", 1: "HDMI", 2: "DVI"}),
@@ -238,6 +240,7 @@ CONTROLS: tuple[Control, ...] = (
         KIND_SELECT,
         {0: "Best fit", 1: "Letterbox", 2: "Follow output", 3: "Virtual wide", 4: "Follow input", 5: "Custom"},
         icon="mdi:aspect-ratio",
+        depends_on=(0, 36, 37),
     ),
     # --- Pan and zoom ----------------------------------------------------------
     Control(28, "h_pan", "H-pan", KIND_NUMBER, minimum=-16, maximum=16, depends_on=(27, 30)),
@@ -263,26 +266,26 @@ CONTROLS: tuple[Control, ...] = (
             10: "400%",
             11: "Custom",
         },
-        depends_on=(27, 36),
+        depends_on=(0, 27, 36),
         icon="mdi:magnify-plus-outline",
     ),
     Control(33, "custom_zoom", "Custom zoom", KIND_NUMBER, minimum=0, maximum=32, depends_on=(27, 32)),
     Control(34, "zoom_h_pan", "Zoom H-pan", KIND_NUMBER, minimum=0, maximum=32, depends_on=(27, 32, 33)),
     Control(35, "zoom_v_pan", "Zoom V-pan", KIND_NUMBER, minimum=0, maximum=32, depends_on=(27, 32, 33)),
     # --- Picture in picture ----------------------------------------------------
-    _on_off(36, "pip", "Picture in picture", icon="mdi:picture-in-picture-bottom-right"),
+    _on_off(36, "pip", "Picture in picture", depends_on=(32,), icon="mdi:picture-in-picture-bottom-right"),
     Control(37, "pip_type", "PIP type", KIND_SELECT, {0: "Picture-in-picture", 1: "Picture + picture", 2: "Split"}, depends_on=(36,)),
     Control(38, "pip_source", "PIP source", KIND_SELECT, _SOURCES, icon="mdi:video-input-component"),
-    Control(39, "pip_size", "PIP size", KIND_SELECT, {0: "1/25", 1: "1/16", 2: "1/9", 3: "1/4", 4: "Custom"}, depends_on=(36,)),
-    Control(40, "pip_h_position", "PIP H-position", KIND_NUMBER, minimum=0, maximum=128, depends_on=(36, 39)),
-    Control(41, "pip_v_position", "PIP V-position", KIND_NUMBER, minimum=0, maximum=128, depends_on=(36, 39)),
-    Control(42, "pip_h_size", "PIP H-size", KIND_NUMBER, minimum=1, maximum=255, depends_on=(36, 39)),
-    Control(43, "pip_v_size", "PIP V-size", KIND_NUMBER, minimum=1, maximum=255, depends_on=(36, 39)),
+    Control(39, "pip_size", "PIP size", KIND_SELECT, {0: "1/25", 1: "1/16", 2: "1/9", 3: "1/4", 4: "Custom"}, depends_on=(36, 37)),
+    Control(40, "pip_h_position", "PIP H-position", KIND_NUMBER, minimum=0, maximum=128, depends_on=(36, 37, 39)),
+    Control(41, "pip_v_position", "PIP V-position", KIND_NUMBER, minimum=0, maximum=128, depends_on=(36, 37, 39)),
+    Control(42, "pip_h_size", "PIP H-size", KIND_NUMBER, minimum=1, maximum=255, depends_on=(36, 37, 39)),
+    Control(43, "pip_v_size", "PIP V-size", KIND_NUMBER, minimum=1, maximum=255, depends_on=(36, 37, 39)),
     _on_off(44, "pip_frame", "PIP frame", depends_on=(36,)),
-    Control(45, "pip_frame_colour", "PIP frame colour", KIND_SELECT, {0: "Red", 1: "Green", 2: "Blue"}, depends_on=(36,)),
+    Control(45, "pip_frame_colour", "PIP frame colour", KIND_SELECT, {0: "Red", 1: "Green", 2: "Blue"}, depends_on=(36, 44)),
     # --- Audio -----------------------------------------------------------------
-    Control(46, "audio_input_type", "Audio input type", KIND_SELECT, {0: "Analogue", 1: "S/PDIF"}),
-    Control(47, "audio_input_volume", "Audio input volume", KIND_NUMBER, minimum=-22, maximum=22),
+    Control(46, "audio_input_type", "Audio input type", KIND_SELECT, {0: "Analogue", 1: "S/PDIF"}, depends_on=_SOURCE_DEPS),
+    Control(47, "audio_input_volume", "Audio input volume", KIND_NUMBER, minimum=-22, maximum=22, depends_on=_SOURCE_DEPS),
     Control(48, "audio_output_volume", "Audio output volume", KIND_NUMBER, minimum=-100, maximum=24),
     Control(49, "bass", "Bass", KIND_NUMBER, minimum=-36, maximum=36),
     Control(50, "treble", "Treble", KIND_NUMBER, minimum=-36, maximum=36),
@@ -292,7 +295,7 @@ CONTROLS: tuple[Control, ...] = (
     Control(
         54,
         "user_delay",
-        "User audio delay",
+        "Audio delay (user defined mode)",
         KIND_NUMBER,
         minimum=0,
         maximum=340,
@@ -324,7 +327,7 @@ CONTROLS: tuple[Control, ...] = (
     Control(69, "pincushion_barrel", "Pincushion/barrel", KIND_NUMBER, minimum=-20, maximum=20),
     Control(70, "rotation", "Rotation", KIND_NUMBER, minimum=-180, maximum=180, depends_on=(56,)),
     # --- Set-up and display ----------------------------------------------------
-    _on_off(74, "frame_lock", "Frame lock"),
+    _on_off(74, "frame_lock", "Frame lock", depends_on=_SOURCE_DEPS),
     Control(76, "firmware", "Firmware revision", KIND_SENSOR, writable=False, diagnostic=True, icon="mdi:chip"),
     Control(77, "mode_set_1", "Mode set 1", KIND_SELECT, {0: "1400x1050x60", 1: "1680x1050x60"}),
     Control(78, "mode_set_2", "Mode set 2", KIND_SELECT, {0: "1280x1024x75", 1: "1280x1024x76"}),
@@ -476,33 +479,79 @@ OUTPUT_SIZES: dict[int, tuple[int, int]] = {
     38: _HD_1080,
 }
 
-# Corner moves: the unit takes 0.45 of the output width (H corners) or height (V
-# corners), in one direction only, and silently ignores anything beyond that.
-# Measured at 1920x1080 (864 / 486), 1280x720 (576 / 324) and 1024x768 (461 / 346).
-CORNER_FRACTION = 0.45
+# Measured on a real unit at every output resolution (probe v3.0, 19 Nov 2026):
+# output resolution (function 25) -> (custom zoom maximum, corner H maximum, corner V maximum).
+# The unit takes a corner move in one direction only (positive for top left H and V,
+# top right V and bottom left H; negative for the others) and silently ignores anything
+# beyond the maximum. Native HDMI (0) and the custom modes (96 to 99) depend on the
+# connected display or the stored mode, so those are what this unit reported.
+RESOLUTION_LIMITS: dict[int, tuple[int, int, int]] = {
+    0: (21, 864, 486),
+    1: (32, 288, 216),
+    2: (32, 288, 216),
+    3: (32, 360, 270),
+    4: (32, 360, 270),
+    5: (32, 360, 270),
+    6: (32, 461, 346),
+    7: (32, 461, 346),
+    8: (32, 461, 346),
+    9: (32, 576, 346),
+    10: (32, 576, 346),
+    11: (32, 576, 324),
+    12: (32, 576, 360),
+    13: (32, 576, 461),
+    14: (32, 576, 461),
+    15: (32, 576, 461),
+    16: (32, 615, 346),
+    17: (32, 615, 346),
+    18: (32, 630, 473),
+    19: (32, 630, 473),
+    20: (26, 720, 540),
+    21: (26, 720, 540),
+    22: (24, 756, 473),
+    23: (21, 864, 486),
+    24: (21, 864, 540),
+    25: (32, 324, 216),
+    26: (32, 324, 259),
+    27: (32, 576, 324),
+    28: (32, 576, 324),
+    29: (21, 864, 486),
+    30: (21, 864, 486),
+    31: (21, 864, 486),
+    32: (21, 864, 486),
+    33: (32, 324, 216),
+    34: (32, 576, 324),
+    35: (21, 864, 486),
+    36: (21, 864, 486),
+    37: (21, 864, 486),
+    38: (21, 864, 486),
+    96: (32, 461, 346),
+    97: (32, 461, 346),
+    98: (32, 461, 346),
+    99: (32, 461, 346),
+}
 CORNER_H = (60, 62, 64, 66)
 CORNER_V = (61, 63, 65, 67)
 CORNER_NEGATIVE = (62, 65, 66, 67)
 CUSTOM_ZOOM_FN = 33
-CUSTOM_ZOOM_MAX_1080 = 21  # at 1920x1080 the unit stops at 21 (32 at 1280x720 and 1024x768)
 
 
 def limits(control: Control, resolution: int | str | None) -> tuple[int, int]:
     """Return (minimum, maximum) for a number, allowing for the output resolution.
 
-    Resolutions that were not measured use the widest range the unit documents,
+    Resolutions that are not in the table use the widest range the unit documents,
     so a valid value is never blocked; the unit still decides.
     """
     low, high = control.minimum, control.maximum
-    size = OUTPUT_SIZES.get(resolution) if isinstance(resolution, int) else None
-    if size is None:
+    row = RESOLUTION_LIMITS.get(resolution) if isinstance(resolution, int) else None
+    if row is None:
         return low, high
+    zoom_max, corner_h, corner_v = row
     if control.fn in CORNER_H or control.fn in CORNER_V:
-        edge = size[0] if control.fn in CORNER_H else size[1]
-        reach = int(CORNER_FRACTION * edge + 0.5)
+        reach = corner_h if control.fn in CORNER_H else corner_v
         return (-reach, 0) if control.fn in CORNER_NEGATIVE else (0, reach)
-    if control.fn == CUSTOM_ZOOM_FN and size == _HD_1080:
-        return low, CUSTOM_ZOOM_MAX_1080
+    if control.fn == CUSTOM_ZOOM_FN:
+        return low, zoom_max
     return low, high
 
 
@@ -531,7 +580,9 @@ _ASPECT_CUSTOM = Requirement(27, (5,), True, "Aspect ratio set to Custom")
 _ZOOM_CUSTOM = Requirement(32, (11,), True, "Zoom set to Custom")
 _PIP_ON = Requirement(36, (1,), True, "Picture in picture on")
 _PIP_OFF = Requirement(36, (0,), True, "Picture in picture off")
+_PIP_TYPE_PIP = Requirement(37, (0,), True, "PIP type set to Picture-in-picture")
 _PIP_CUSTOM = Requirement(39, (4,), True, "PIP size set to Custom")
+_NO_SIGNAL = 98  # what function 103 reports when nothing is detected on the selected input
 
 REQUIREMENTS: dict[int, tuple[Requirement, ...]] = {
     28: (_ASPECT_CUSTOM, Requirement(30, (0,), False, "H-zoom other than 0")),
@@ -542,14 +593,16 @@ REQUIREMENTS: dict[int, tuple[Requirement, ...]] = {
     33: (_ZOOM_CUSTOM,),
     34: (_ZOOM_CUSTOM, Requirement(33, (0,), False, "Custom zoom above 0")),
     35: (_ZOOM_CUSTOM, Requirement(33, (0,), False, "Custom zoom above 0")),
+    # The unit refuses to switch picture in picture on while the zoom is above 100%.
+    36: (Requirement(32, (0,), True, "Zoom set to 100%"),),
     37: (_PIP_ON,),
-    39: (_PIP_ON,),
-    40: (_PIP_ON, _PIP_CUSTOM),
-    41: (_PIP_ON, _PIP_CUSTOM),
-    42: (_PIP_ON, _PIP_CUSTOM),
-    43: (_PIP_ON, _PIP_CUSTOM),
+    39: (_PIP_ON, _PIP_TYPE_PIP),
+    40: (_PIP_ON, _PIP_TYPE_PIP),
+    41: (_PIP_ON, _PIP_TYPE_PIP),
+    42: (_PIP_ON,),
+    43: (_PIP_ON, _PIP_TYPE_PIP, _PIP_CUSTOM),
     44: (_PIP_ON,),
-    45: (_PIP_ON,),
+    45: (_PIP_ON, Requirement(44, (1,), True, "PIP frame on")),
     54: (Requirement(53, (1,), True, "Audio delay mode set to User defined"),),
     60: (Requirement(56, (1,), True, "Geometry application set to Anyplace"),),
     70: (Requirement(56, (2,), True, "Geometry application set to Rotation"),),
@@ -558,9 +611,51 @@ REQUIREMENTS: dict[int, tuple[Requirement, ...]] = {
 for _fn in (61, 62, 63, 64, 65, 66, 67):
     REQUIREMENTS[_fn] = REQUIREMENTS[60]
 
+# What the selected input does not offer. Checked on a real unit with a signal on each
+# of these (probe v3.1, 19 Nov 2026); other inputs (VGA, HDMI 2, USB) were not checked
+# with a signal, so they get the general wording.
+SOURCE_HDMI = "HDMI"
+SOURCE_COMPOSITE = "composite video"
+SOURCE_SVIDEO = "S-video"
+SOURCE_COMPONENT = "component video"
+_NOT_ON: dict[str, tuple[int, ...]] = {
+    SOURCE_HDMI: (6, 7, 8, 9, 10, 18, 19, 20, 21, 22, 46),
+    SOURCE_COMPOSITE: (5, 7, 8, 9, 10),
+    SOURCE_SVIDEO: (5, 7, 8, 9, 10),
+    SOURCE_COMPONENT: (5, 6, 9),
+}
+_TYPE_NAMES = {0: SOURCE_COMPONENT, 1: SOURCE_SVIDEO, 2: SOURCE_COMPOSITE}
+# Picture and output controls the unit refuses while nothing is detected on the input.
+SIGNAL_FNS = (*range(12, 25), 27, 32, 74)
 # Things the unit refuses on some inputs, whatever else is set.
-INPUT_DEPENDENT_FNS = (5, 6, 7, 8, 9, 10, 11)
+INPUT_DEPENDENT_FNS = (5, 6, 7, 8, 9, 10, 11, 18, 19, 20, 21, 22, 46)
 STANDBY_REASON = "The unit is in standby"
+
+
+def source_kind(values: dict[int, int | str | None]) -> str | None:
+    """Return what the selected input is (HDMI, composite and so on), or None if not known."""
+    source = values.get(0)
+    if not isinstance(source, int):
+        return None
+    if source in (6, 7):
+        return SOURCE_HDMI
+    if 0 <= source <= 3:
+        kind = values.get(1 + source)
+        return _TYPE_NAMES.get(kind) if isinstance(kind, int) else None
+    return None
+
+
+def _pip_needs(fn: int, values: dict[int, int | str | None]) -> list[str]:
+    """Return what picture in picture still needs for the functions that change with its type and size."""
+    if values.get(36) != 1:
+        return []  # "Picture in picture on" is reported by the general rules
+    pip_type, size = values.get(37), values.get(39)
+    needs: list[str] = []
+    if fn == 27 and pip_type in (1, 2):
+        needs.append("Picture in picture off or PIP type set to Picture-in-picture")
+    if fn == 42 and pip_type == 0 and isinstance(size, int) and size != 4:
+        needs.append("PIP size set to Custom")
+    return needs
 
 
 def unavailable_reason(fn: int, values: dict[int, int | str | None]) -> str | None:
@@ -568,12 +663,18 @@ def unavailable_reason(fn: int, values: dict[int, int | str | None]) -> str | No
     if fn != POWER_FN and values.get(POWER_FN) == 0:
         return STANDBY_REASON
     unmet = [req.text for req in REQUIREMENTS.get(fn, ()) if not req.met(values.get(req.fn))]
+    unmet += _pip_needs(fn, values)
     if fn == 83:
         size = OUTPUT_SIZES.get(values.get(RESOLUTION_FN)) if isinstance(values.get(RESOLUTION_FN), int) else None
         if size and size[0] >= 1400:
             unmet.append("an output resolution under 1400 pixels wide")
     if unmet:
         return "Needs " + " and ".join(unmet)
+    kind = source_kind(values)
+    if kind is not None and fn in _NOT_ON.get(kind, ()):
+        return f"Not available with {kind}"
+    if fn in SIGNAL_FNS and values.get(103) == _NO_SIGNAL:
+        return "Needs a signal on the selected input"
     if fn in INPUT_DEPENDENT_FNS:
         return "Not available for the selected input"
     return None

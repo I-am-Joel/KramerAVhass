@@ -104,8 +104,18 @@ class Vp729Number(Vp729Entity, NumberEntity):
         return value if isinstance(value, int) else None
 
     async def async_set_native_value(self, value: float) -> None:
-        """Send the value to the unit (it is read back to confirm)."""
-        await self._call(self._client.async_set(self._control.fn, int(value)))
+        """Send the value to the unit (it is read back to confirm).
+
+        A setting that moves in steps (the audio delay is in 2 ms steps) is rounded up to
+        the next step, as the unit does, so the read-back matches what was sent.
+        """
+        wanted = int(value)
+        step = self._control.step
+        if step > 1:
+            wanted = -(-wanted // step) * step
+        low, high = self.native_min_value, self.native_max_value
+        wanted = int(min(max(wanted, low), high))
+        await self._call(self._client.async_set(self._control.fn, wanted))
 
 
 class Vp729Switch(Vp729Entity, SwitchEntity):
@@ -169,6 +179,8 @@ class Vp729Button(KramerEntity, ButtonEntity):
         """Profile buttons are greyed out while the unit is saving, recalling or settling."""
         if self._profile and self._client.busy:
             return False
+        if self._client.standby:
+            return False  # in standby the unit takes no key presses
         return super().available
 
     async def async_press(self) -> None:
@@ -239,7 +251,7 @@ class Vp729StatusSensor(KramerEntity, SensorEntity):
             for control in CONTROLS:
                 if control.readable and client.function_available(control.fn) and not control.diagnostic:
                     settings[control.key] = label(control, client.value(control.fn)) if control.options else client.value(control.fn)
-                elif (reason := client.reason_unavailable(control.fn)) and not control.diagnostic:
+                elif control.kind != KIND_BUTTON and not control.diagnostic and (reason := client.reason_unavailable(control.fn)):
                     reasons[control.key] = reason
         return {
             "schema_version": STATUS_SCHEMA_VERSION,

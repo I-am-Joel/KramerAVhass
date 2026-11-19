@@ -129,17 +129,23 @@ async def test_diagnostics(hass: HomeAssistant, hass_client) -> None:
     await sim.stop()
 
 
+async def _vp_flow(hass: HomeAssistant):
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"model": "vp-729"})
+    assert result["step_id"] == "connection"
+    return result
+
+
 async def test_config_flow_vp729(hass: HomeAssistant) -> None:
-    """Choosing the VP-729 asks for its port and tests the connection."""
+    """Model first, then name, address and port (default 5000, no machine number)."""
     sim = Vp729Sim()
     port = await sim.start()
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await _vp_flow(hass)
+    schema = {str(k): k.default() for k in result["data_schema"].schema}
+    assert schema["port"] == 5000 and "machine" not in schema
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {"name": "Scaler", "ip_address": "127.0.0.1", "port": 9001, "machine": 1, "model": "vp-729"},
+        result["flow_id"], {"name": "Scaler", "ip_address": "127.0.0.1", "port": port}
     )
-    assert result["type"] is FlowResultType.FORM and result["step_id"] == "vp729"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"port": port})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"]["model"] == "vp-729"
     assert "machine" not in result["data"] and "inputs" not in result["data"]
@@ -151,16 +157,13 @@ async def test_config_flow_vp729(hass: HomeAssistant) -> None:
 
 async def test_config_flow_vp729_no_reply(hass: HomeAssistant) -> None:
     """A port that connects but is not a VP-729 gives the VP-729 hint."""
+
     async def silent(reader, writer):
         await asyncio.sleep(30)
 
     server = await asyncio.start_server(silent, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {"name": "Scaler", "ip_address": "127.0.0.1", "port": 1, "machine": 1, "model": "vp-729"},
-    )
+    result = await _vp_flow(hass)
     import custom_components.kramer.config_flow as cf
 
     original = cf.async_probe_vp729
@@ -170,11 +173,13 @@ async def test_config_flow_vp729_no_reply(hass: HomeAssistant) -> None:
 
     cf.async_probe_vp729 = quick
     try:
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"port": port})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"name": "Scaler", "ip_address": "127.0.0.1", "port": port}
+        )
     finally:
         cf.async_probe_vp729 = original
         server.close()
-    assert result["type"] is FlowResultType.FORM
+    assert result["type"] is FlowResultType.FORM and result["step_id"] == "connection"
     assert result["errors"] == {"base": "no_reply_vp729"}
 
 
@@ -183,12 +188,20 @@ async def test_reconfigure_cannot_change_type(hass: HomeAssistant) -> None:
     sim = Vp729Sim()
     entry = await setup(hass, sim)
     result = await entry.start_reconfigure_flow(hass)
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {"name": "Scaler", "ip_address": "127.0.0.1", "port": entry.data["port"], "machine": 1, "model": "vs-812"},
-    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"model": "vs-812"})
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "type_change"}
+    await hass.config_entries.async_unload(entry.entry_id)
+    await sim.stop()
+
+
+async def test_reconfigure_keeps_the_saved_port(hass: HomeAssistant) -> None:
+    sim = Vp729Sim()
+    entry = await setup(hass, sim)
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"model": "vp-729"})
+    schema = {str(k): k.default() for k in result["data_schema"].schema}
+    assert schema["port"] == entry.data["port"]
     await hass.config_entries.async_unload(entry.entry_id)
     await sim.stop()
 
@@ -199,5 +212,42 @@ async def test_options_flow_has_nothing_to_configure(hass: HomeAssistant) -> Non
     entry = await setup(hass, sim)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "no_options"
+    await hass.config_entries.async_unload(entry.entry_id)
+    await sim.stop()
+
+
+async def test_names_ranges_and_reasons(hass: HomeAssistant) -> None:
+    """0.15.1 naming, ranges, reasons and standby behaviour."""
+    sim = Vp729Sim()
+    entry = await setup(hass, sim)
+    reg = er.async_get(hass)
+    assert hass.states.get(entity_id(hass, entry, "switch", "power")).attributes["friendly_name"].endswith("Power (standby)")
+    assert hass.states.get(entity_id(hass, entry, "button", "key_top")).attributes["friendly_name"].endswith("Up")
+    assert reg.async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_save_lock")
+    delay = hass.states.get(entity_id(hass, entry, "number", "user_delay"))
+    assert delay.attributes["friendly_name"].endswith("Audio delay (user defined mode)")
+    assert delay.attributes["max"] == 340 and delay.attributes["step"] == 2
+    assert delay.attributes["unit_of_measurement"] == "ms"
+    assert hass.states.get(entity_id(hass, entry, "number", "pip_h_size")).attributes["max"] == 255
+    h_zoom = hass.states.get(entity_id(hass, entry, "number", "h_zoom"))
+    assert h_zoom.state == "unavailable"
+    status = hass.states.get(entity_id(hass, entry, "sensor", "status"))
+    # Home Assistant hides an unavailable entity's own attributes, so the reasons are listed here.
+    assert status.attributes["unavailable_reasons"]["h_zoom"] == "Needs Aspect ratio set to Custom"
+    assert status.attributes["model"] == "VP-729" and status.attributes["protocol"] == "ASCII"
+    # Standby: everything but power becomes unavailable.
+    await hass.services.async_call("switch", "turn_off", {"entity_id": entity_id(hass, entry, "switch", "power")}, blocking=True)
+    for _ in range(60):
+        await asyncio.sleep(0.1)
+        if hass.states.get(entity_id(hass, entry, "number", "brightness")).state == "unavailable":
+            break
+    assert hass.states.get(entity_id(hass, entry, "number", "brightness")).state == "unavailable"
+    assert hass.states.get(entity_id(hass, entry, "switch", "power")).state == "off"
+    # In standby the key buttons are unavailable too, and the Status sensor does not list buttons.
+    assert hass.states.get(entity_id(hass, entry, "button", "key_menu")).state == "unavailable"
+    assert hass.states.get(entity_id(hass, entry, "button", "volume_up")).state == "unavailable"
+    reasons = hass.states.get(entity_id(hass, entry, "sensor", "status")).attributes["unavailable_reasons"]
+    assert reasons["brightness"] == "The unit is in standby"
+    assert not [key for key in reasons if key.startswith("key_") or key in ("capture", "auto_image")]
     await hass.config_entries.async_unload(entry.entry_id)
     await sim.stop()

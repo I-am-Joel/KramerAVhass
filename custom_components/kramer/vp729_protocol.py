@@ -69,6 +69,8 @@ VERIFY_INTERVAL = 0.25
 PROMPT_WAIT = 0.5  # how long to wait for ">" after a reply
 PACING_GAP = 0.03  # a short pause after the prompt
 MAX_HOLD_WAIT = 30.0
+LOCK_FNS = (85, 102)  # save lock, front panel lock
+LOCK_RECHECK_SECONDS = 15.0  # after waking from standby
 
 ERROR_TEXT = {
     1: "bad command",
@@ -194,6 +196,7 @@ class Vp729Client:
         self._prompt = asyncio.Event()
         self._full_refresh = True
         self._dirty: set[int] = set()
+        self._was_standby = False
 
         self.available = False
         self.values: dict[int, int | str | None] = {}
@@ -598,6 +601,7 @@ class Vp729Client:
         """Read every readable function (in standby only the power function answers)."""
         await self._read_into_state(POWER_FN)
         if self.values.get(POWER_FN) == 0:
+            self._was_standby = True
             self._set_available(True)
             self._ready.set()
             self._notify()
@@ -618,6 +622,17 @@ class Vp729Client:
         self._set_available(True)
         self._ready.set()
         self._notify()
+        if self._was_standby:
+            # The unit has just woken: read both locks again shortly afterwards and show
+            # whatever it then reports (a lock may not survive standby).
+            self._was_standby = False
+            with contextlib.suppress(RuntimeError):
+                asyncio.get_running_loop().call_later(LOCK_RECHECK_SECONDS, self._recheck_locks)
+
+    def _recheck_locks(self) -> None:
+        """Read the save lock and the front panel lock again."""
+        self._dirty.update(LOCK_FNS)
+        self._refresh_event.set()
 
     async def _read_loop(self, reader: asyncio.StreamReader) -> None:
         """Read lines until the connection closes."""

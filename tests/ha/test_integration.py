@@ -454,18 +454,24 @@ async def test_panel_events_and_connection_sensor(hass: HomeAssistant) -> None:
     await sim.stop()
 
 
+async def _start_flow(hass: HomeAssistant, model: str):
+    """Open the add flow and answer the model screen."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    assert result["step_id"] == "user" and set(result["data_schema"].schema) == {"model"}
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"model": model})
+    assert result["step_id"] == "connection"
+    return result
+
+
 async def test_config_flow_known_and_other(hass: HomeAssistant) -> None:
-    """Test config flow known and other."""
+    """Model first, then the connection screen; Other adds a third screen."""
     sim = Sim()
     port = await sim.start()
     base = {"name": "Dining", "ip_address": "127.0.0.1", "port": port, "machine": 1}
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {**base, "model": "vs-162av-rca"}
-    )
+    result = await _start_flow(hass, "vs-162av-rca")
+    assert {str(k): k.default() for k in result["data_schema"].schema}["port"] == 9001
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], base)
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"]["inputs"] == 16 and "preset_slots" not in result["data"]
     await hass.async_block_till_done()
@@ -473,94 +479,54 @@ async def test_config_flow_known_and_other(hass: HomeAssistant) -> None:
     assert entry.runtime_data.preset_slots == 60
     await hass.config_entries.async_unload(entry.entry_id)
 
-    # An "Other" model asks for the number of stored setups.
     sim2 = Sim(machine=2, presets=True)
     port2 = await sim2.start()
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    result = await _start_flow(hass, "other")
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {**base, "port": port2, "machine": 2, "model": "other"}
+        result["flow_id"], {**base, "port": port2, "machine": 2}
     )
     assert result["step_id"] == "other"
     assert "preset_slots" in result["data_schema"].schema
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {
-            "model_name": "VS-9000",
-            "inputs": 8,
-            "outputs": 8,
-            "supports_modes": True,
-            "preset_slots": 10,
-        },
+        {"model_name": "VS-9000", "inputs": 8, "outputs": 8, "supports_modes": True, "preset_slots": 10},
     )
-    assert (
-        result["type"] is FlowResultType.CREATE_ENTRY
-        and result["data"]["preset_slots"] == 10
-    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY and result["data"]["preset_slots"] == 10
     await hass.async_block_till_done()
-    other = next(
-        e
-        for e in hass.config_entries.async_entries(DOMAIN)
-        if e.data["model"] == "other"
-    )
+    other = next(e for e in hass.config_entries.async_entries(DOMAIN) if e.data["model"] == "other")
     assert other.runtime_data.preset_slots == 10
     await hass.config_entries.async_unload(other.entry_id)
     await sim.stop()
     await sim2.stop()
 
 
-async def test_other_model_connection_failure_returns_to_first_screen(
+async def test_other_model_connection_failure_returns_to_connection_screen(
     hass: HomeAssistant,
 ) -> None:
-    """A failed connection test on the second screen goes back to the first, keeping every typed value."""
+    """A failed test on the third screen goes back to the connection screen, keeping typed values."""
     dead = Sim()
     dead_port = await dead.start()
-    await dead.stop()  # nothing listens here any more
+    await dead.stop()
     base = {"name": "Spare", "ip_address": "127.0.0.1", "port": dead_port, "machine": 3}
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {**base, "model": "other"}
-    )
+    result = await _start_flow(hass, "other")
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], base)
     assert result["step_id"] == "other"
-    second = {
-        "model_name": "VS-9000",
-        "inputs": 12,
-        "outputs": 6,
-        "supports_modes": True,
-        "preset_slots": 7,
-    }
+    second = {"model_name": "VS-9000", "inputs": 12, "outputs": 6, "supports_modes": True, "preset_slots": 7}
     result = await hass.config_entries.flow.async_configure(result["flow_id"], second)
-    assert result["type"] is FlowResultType.FORM and result["step_id"] == "user"
+    assert result["type"] is FlowResultType.FORM and result["step_id"] == "connection"
     assert result["errors"]["base"] in {"cannot_connect", "no_reply"}
     shown = {str(k): k.default() for k in result["data_schema"].schema}
-    assert (
-        shown["name"] == "Spare"
-        and shown["ip_address"] == "127.0.0.1"
-        and shown["machine"] == 3
-    )
-    assert shown["model"] == "other"
+    assert shown["name"] == "Spare" and shown["ip_address"] == "127.0.0.1" and shown["machine"] == 3
 
-    # Fixing the address and continuing finds the second screen already filled in.
     sim = Sim(machine=3, presets=True)
     port = await sim.start()
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {**base, "port": port, "model": "other"}
-    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {**base, "port": port})
     assert result["step_id"] == "other"
     filled = {str(k): k.default() for k in result["data_schema"].schema}
-    assert (
-        filled["model_name"] == "VS-9000"
-        and filled["inputs"] == 12
-        and filled["outputs"] == 6
-    )
+    assert filled["model_name"] == "VS-9000" and filled["inputs"] == 12 and filled["outputs"] == 6
     assert filled["preset_slots"] == 7 and filled["supports_modes"] is True
     result = await hass.config_entries.flow.async_configure(result["flow_id"], second)
-    assert (
-        result["type"] is FlowResultType.CREATE_ENTRY and result["data"]["inputs"] == 12
-    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY and result["data"]["inputs"] == 12
     await hass.async_block_till_done()
     for e in hass.config_entries.async_entries(DOMAIN):
         await hass.config_entries.async_unload(e.entry_id)
@@ -1006,7 +972,8 @@ async def test_vs808yc_model(hass: HomeAssistant) -> None:
     labels = [
         o["label"] for o in result["data_schema"].schema["model"].config["options"]
     ]
-    assert "VS-808YC" in labels
+    assert "VS-808YC (Protocol 2000)" in labels
+    assert labels[0] == "VP-729 (ASCII)" and labels[-1].startswith("Other")
     await hass.config_entries.async_unload(entry.entry_id)
     await sim.stop()
 
@@ -1103,23 +1070,16 @@ async def test_model_notes_and_form_values_kept(hass: HomeAssistant) -> None:
     assert defaults["input_names"] == bad and defaults["output_names"] == "Out"
 
     # Add-integration form keeps typed values after a failed connection.
-    flow = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    flow = await _start_flow(hass, "vs-812")
     flow = await hass.config_entries.flow.async_configure(
         flow["flow_id"],
-        {
-            "name": "Typed",
-            "ip_address": "127.0.0.1",
-            "port": 1,
-            "machine": 1,
-            "model": "vs-812",
-        },
+        {"name": "Typed", "ip_address": "127.0.0.1", "port": 1, "machine": 1},
     )
     assert flow["errors"]["base"] == "cannot_connect"
     defaults = {str(k): k.default() for k in flow["data_schema"].schema}
     assert (
         defaults["name"] == "Typed"
         and defaults["port"] == 1
-        and defaults["model"] == "vs-812"
     )
     await hass.config_entries.async_unload(entry.entry_id)
     await sim.stop()

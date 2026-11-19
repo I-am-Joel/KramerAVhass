@@ -159,6 +159,7 @@ async def test_config_flow_vp729_no_reply(hass: HomeAssistant) -> None:
     """A port that connects but is not a VP-729 gives the VP-729 hint."""
 
     async def silent(reader, writer):
+        """Silent."""
         await asyncio.sleep(30)
 
     server = await asyncio.start_server(silent, "127.0.0.1", 0)
@@ -169,6 +170,7 @@ async def test_config_flow_vp729_no_reply(hass: HomeAssistant) -> None:
     original = cf.async_probe_vp729
 
     async def quick(host, port_, timeout=0.5):
+        """Quick."""
         return await original(host, port_, timeout=0.5)
 
     cf.async_probe_vp729 = quick
@@ -196,6 +198,7 @@ async def test_reconfigure_cannot_change_type(hass: HomeAssistant) -> None:
 
 
 async def test_reconfigure_keeps_the_saved_port(hass: HomeAssistant) -> None:
+    """Reconfigure keeps the saved port."""
     sim = Vp729Sim()
     entry = await setup(hass, sim)
     result = await entry.start_reconfigure_flow(hass)

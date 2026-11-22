@@ -118,7 +118,7 @@ Copy the `custom_components/kramer` folder from this repository into the
 1. Go to **Settings > Devices & services > Add integration** and choose your model (if listed).
 2. Fill in the setup wizard as required for your device type. The machine number defaults to 1 - make sure your unit is configured to match.
 3. For matrix switchers, if your model is not listed, you can choose **Other** and enter its model name, the number of inputs
-   and outputs it supports, whether it also supports separate audio and video switching and the number of presets available (if any). You can choose any size of switcher or matrix, up to 127x127 (the maximum supported by Protocol 2000).
+   and outputs it supports, whether it also supports separate audio and video switching and the number of presets available (if any). You can choose any size of switcher or matrix, up to 127x127 (the maximum supported by Protocol 2000). There is no "other" option for presentation scalers. Although untested, available options on other presentation scalers should still be exposed using the tested model that's listed (VP-729), if they use the same protocol.
 4. Home Assistant tests the connection before saving. If it fails, you will be
    told whether it could not connect at all or connected but got no answer from
    the switcher.
@@ -126,11 +126,19 @@ Copy the `custom_components/kramer` folder from this repository into the
 ### Changing settings later
 
 - **Reconfigure** (three-dot menu on the integration): change available options relevant to your device, including name, address, port, machine number, model and number of supported presets. You cannot use reconfigure to switch between Protocol 2000 and ASCII controlled devices.
+  
 - **Configuration** (on the integration):
+
+<img width="894" height="614" alt="kramer-vs162-configuration-main" src="https://github.com/user-attachments/assets/e2e414ac-66c9-42bf-b7a6-eea2ea7cb4b8" />
+
   Rename audio and video inputs and audio and video outputs, one name per line. Leave a line blank to keep the default. The names "Off" and "Mixed"
   are reserved and all names must be unique.
 
+  <img width="920" height="1408" alt="kramer-vs162-configuration-input-output-renaming" src="https://github.com/user-attachments/assets/0a344d89-1f32-49e7-8192-646a084015c5" />
+
   Set up, store and recall presets (for models that support this). Support varies between models. You can store and recall presets but cannot delete a preset's configuration. Instead you can clear its name to indicate a preset number is free to be overwritten and you can store a new configuration over the top of an existing preset. The integration identifies and displays preset slots that are occupied or empty.
+
+  <img width="870" height="1002" alt="kramer-vs162-configuration-presets" src="https://github.com/user-attachments/assets/2516394d-326e-4339-86cd-aad186da971f" />
 
 ## Actions (matrix switchers only)
 

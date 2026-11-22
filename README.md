@@ -80,7 +80,7 @@ Each unit has one **Status** sensor (a diagnostic entity, with an entity ID endi
 
 The attributes are not stored in Home Assistant's history, so routing changes do not make the database grow. Only the sensor's state is recorded.
 
-**Schema version.** Attributes may be added in future versions. A change that breaks the existing scheme would change the `schema_version`, so anything you build on this sensor can be designed to check for changes.
+**Schema version.** Attributes may be added in future versions. A change that breaks the existing schema would be accompanied by an incremental change to the `schema_version`, so anything you build on this sensor can be designed to check for changes.
 
 ## Requirements
 

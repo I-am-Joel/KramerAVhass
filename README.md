@@ -8,6 +8,8 @@ the unit.
 This is a fork of [krohrbaugh/kramer-homeassistant][original] by Kevin
 Rohrbaugh, and it would not exist without his work. See [Credits](#credits).
 
+Matching dashboard card at https://github.com/I-am-Joel/kramerav-matrix-panel-card
+
 > **Status:** working release. I have tested published features on four units (Kramer
 > VS-162AVRCA, VS-812 & VS-808YC matrix switchers and a Kramer VP-729 presentation scaler), the matrix switchers connected through Brainboxes ES-247 and ES-246 serial-to-Ethernet
 > bridges and the presentation scaler directly via ethernet. Other models and bridges are expected to work but are untested.

@@ -39,7 +39,7 @@ All of these update in HASS and on the device front panel, where available. Defa
 ## How it connects
 
 The integration uses Kramer's [Protocol 2000][p2000] for matrix switchers and ASCII for presentation scalers, both over a single TCP
-connection. It was built to work via both serial (RS-232) and ethernet.
+connection. It was built to work via either serial (RS-232) or ethernet.
 
 ```
 Home Assistant ---- network ---- ethernet-serial bridge>RS-232/direct ethernet ---- Kramer

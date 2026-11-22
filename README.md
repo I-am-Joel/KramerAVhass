@@ -273,7 +273,7 @@ this version does not.
 
 The revised code was written with Claude.
 
-This integration was not written by, or with the endorsement or support of, Kramer AV but serves the very real need of extending the life of models that are no longer supported by the manufacturer.
+This integration was not written by, or with the endorsement or support of, Kramer AV but meets the need to extend the life of models that are no longer supported by the manufacturer and might otherwise go to landfill.
 
 ## Licence
 
@@ -281,5 +281,4 @@ MIT, as the original. The original copyright notice is kept in
 [LICENSE](LICENSE).
 
 [original]: https://github.com/krohrbaugh/kramer-homeassistant
-[author]: https://github.com/krohrbaugh
 [p2000]: https://kramerav.com/downloads/protocols/protocol_2000_rev0_51.pdf

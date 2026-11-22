@@ -138,7 +138,7 @@ Copy the `custom_components/kramer` folder from this repository into the
 
   Set up, store and recall presets (for models that support this). Support varies between models. You can store and recall presets but cannot delete a preset's configuration. Instead you can clear its name to indicate a preset number is free to be overwritten and you can store a new configuration over the top of an existing preset. The integration identifies and displays preset slots that are occupied or empty.
 
-  <img width="870" height="1002" alt="kramer-vs162-configuration-presets" src="https://github.com/user-attachments/assets/2516394d-326e-4339-86cd-aad186da971f" />
+<img width="904" height="594" alt="kramer-vs162-configuration-presets1" src="https://github.com/user-attachments/assets/8cc6f3b9-ff7f-4997-9b9a-61c45f45de52" />
 
 ## Actions (matrix switchers only)
 

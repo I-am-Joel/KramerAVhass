@@ -50,11 +50,11 @@ Home Assistant ---- network ---- ethernet-serial bridge>RS-232/direct ethernet -
 The integration:
 
 - keeps a connection open for each device and reconnects by itself if a bridge or the
-  switcher loses power or the network drops (tested);
+  switcher loses power or the network drops;
 - asks the switcher for its full state when it connects, acts on messages the unit sends as it changes and re-reads full state, defaulted to once per minute;
 
 **Only one program should be connected to the bridge's TCP port at a time.**
-Some bridges pass serial data to every connected client but older firmware may
+Some bridges pass serial data to every connected client but some may
 drop connections when two clients are attached. Do not leave a second tool
 (for example `nc` or another Home Assistant integration) connected to the same
 port as this Kramer AV integration.

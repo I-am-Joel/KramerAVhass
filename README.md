@@ -12,8 +12,8 @@ A custom dashboard card for switchers and matrixes is at https://github.com/I-am
 
 <img width="1800" height="406" alt="VS-812" src="https://github.com/user-attachments/assets/bf5bd08c-208e-443d-acc4-4c3a5d2bc133" />
 
-> I have tested published features on four units (Kramer
-> VS-162AVRCA, VS-812 & VS-808YC matrix switchers and a Kramer VP-729 presentation scaler), the matrix switchers connected through Brainboxes ES-247 and ES-246 serial-to-Ethernet
+> I have tested this integration on four units (Kramer
+> VS-162AVRCA, VS-812 & VS-808YC matrix switchers and a Kramer VP-729 presentation scaler), with the matrix switchers connected through Brainboxes ES-247 and ES-246 serial-to-Ethernet
 > bridges and the presentation scaler directly via ethernet. Other models and bridges should work but have not been tested.
 
 <img width="2654" height="1456" alt="kramer-integration-device-view" src="https://github.com/user-attachments/assets/9ca684f6-f2e3-4c06-bc18-2db16ec647c7" />

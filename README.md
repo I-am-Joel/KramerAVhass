@@ -142,7 +142,7 @@ Copy the `custom_components/kramer` folder from this repository into the
 
 ## Actions (matrix switchers only)
 
-Actions are called from scripts, automations, dashboard buttons or Developer tools → Actions. Each one targets a Kramer device (choose the switcher as the target).
+Actions can be called from scripts, automations, dashboard buttons or in Tools → Actions. Each one targets a Kramer device (choose the switcher as the target).
 
 Inputs and outputs can be given by number or by name (names are the ones set under Configure → Input and output names, and are not case sensitive). An input can be given by its video or audio name. An output can be given by its video name, its audio name or its shared name (for example "Output 001", which covers "Output 001 Video" and "Output 001 Audio").
 

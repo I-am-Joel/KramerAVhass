@@ -189,7 +189,7 @@ Models without routing modes (for example the VS-812) refuse this action with an
 
 ### `kramer.store_preset`
 
-Stores the present setup (video routing, audio routing and mode) in a preset on the unit. Only on models with presets.
+Stores the present setup (video routing, audio routing and mode) in a preset on the unit (where available).
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -213,8 +213,6 @@ Recalls a stored setup. A full recall also sets the mode that was stored with it
 - Descriptions are only held in Home Assistant, set under Configure → Presets. They are not stored on the unit.
 - Preset numbers match those called via the unit's front panel (eg VS-162AV/RCA: 1 to 60).
 
-
-
 ## Tested models and features
 
 | Model | Notes |
@@ -222,14 +220,14 @@ Recalls a stored setup. A full recall also sets the mode that was stored with it
 | VS-162AV / VS-162AVRCA | 16 x 16 matrix switching, audio-follow-video and breakaway, 60 presets, panel lock (see limitations). Tested on the RCA version. |
 | VS-812 | 8 x 1 input switching. |
 | VS-808YC | 8 x 8 matrix switching, AFV, breakaway, 16 presets, panel lock |
-| VP-729 | multi-format input switching, scaling, format conversion, PIP, image correction, panel lock |
+| VP-729 | multi-format input switching, scaling, format conversion, aspect ratio control, image correction, Picture-In-Picture, panel lock |
 
 ## Limitations (not all features apply to all models)
 
 - **One unit per entry.** Add the integration once per switcher. Daisy-chained
   units on one connection are not tested or supported by this integration. It might work and machine number is available in the configuration if you want to try.
-- **Presets.** It is not possible to delete a preset, once added. You *can* overwrite them.
-- **Unannounced configuration changes** Some settings changed through a unit's on-screen menu - rather than via a dedicated panel button - are not announced by some models. An example I've discovered is that changing the front panel lock on the VS-162AV/RCA - via its menu driven control - is not announced, but changing the front panel lock on the VS-808YC - via its dedicated "panel lock" button - *is* announced. This integration refreshes all unit's states every 60 seconds, regardless, so an unannounced change will still appear in Home Assistant, but that could take up to 60 seconds. Changes made via the integration in Home Assistant are not affected by this limitation and the unit responds to such changes immediately. If this matters to you, the refresh interval can be adjusted in the device's options, at the cost of extra network traffic.
+- **Presets.** It is not possible to delete a preset, once added. This appears to be a limit in the design of the firmware I've tested. You *can* overwrite them.
+- **Unannounced configuration changes** Some settings changed through a unit's on-screen menu - rather than via a dedicated panel button - are not announced by some models. An example I've discovered is that changing the front panel lock on the VS-162AV/RCA - via its menu driven control - is not announced, but changing the front panel lock on the VS-808YC - via its dedicated "panel lock" button - *is* announced. This integration refreshes all units' states every 60 seconds, regardless, so an unannounced change will still appear in Home Assistant. Changes made via the integration in Home Assistant are not affected by this limitation and the unit responds to such changes immediately. If this matters to you, the default refresh interval can be adjusted in each device's options, at the cost of extra network traffic.
 - The integration adds no features or functions that aren't already on the device. It follows a connected device's own limitations, as well as its own.
 
 ## Planned if possible
@@ -257,8 +255,8 @@ Assistant restarts. The log shows each connected unit's four-byte messages in he
 | "Could not connect" during setup | Wrong IP or port, or the bridge (if used) is not in raw TCP server mode. |
 | "Connected, but the switcher did not answer" | Serial settings, cable or null-modem setting or adaptor, or wrong machine number. Check configuration options in the product manual and that dip switches on the unit match your required configuration. On some models the up/down and switch numbers aren't clear. EG VS-812 has switches on the underside with 1 to 4 running from right to left of the unit, as viewed from the front and with "on" being towards the back panel<img width="1200" height="800" alt="Kramer vs-812 underside" src="https://github.com/user-attachments/assets/1a19251d-acca-45bc-bcf6-f86c340d9d69" />Image shows underside of Kramer VS-812 with switch 1 in the "on" position. |
 | Entities unavailable | Bridge or switcher is off, or the network is down or disconnected. The integration should recover by itself after the underlying issue is resolved. |
-| Connection resets when two or more applications are communicating with the bridge | In testing with a Brainboxes ES-246, reliable operation was confirmed with one application (eg this integration) using the bridge's port and became unreliable with two (eg this integration and ssh). Different bridges or firmware versions may support this better. |
-| Serial link not working | It's worth testing the link between your HASS host and the unit, bypassing the integration, to narrow down the cause. Disable the Kramer entry for that unit, then run the command: `(printf '\x05\x80\x81\x81'; sleep 3) \| nc -w 5 IPADDRESS PORT \| od -An -tx1` from a terminal in Home Assistant (replace IPADDRESS and PORT). A working link prints one line of four numbers starting 45. No output means the bridge is reachable but the unit isn't answering: check the serial cable (a null-modem adapter is needed on some models), the bridge's serial settings (9600, 8 data bits, no parity, 1 stop bit, no flow control) and the machine number dip switches on the unit. If it outputs an error such as "Connection refused" or "timed out", instead of numbers, Home Assistant can't reach the bridge at all. In which case, check the bridge is powered and on the network, its IP address and port are correctly configured, that it is set to Raw TCP, and that nothing else is connected to it. Don't forget to re-enable the integration entry, when you're done. |
+| Connection resets when two or more applications are communicating with the bridge | In testing with a Brainboxes ES-246, reliable operation was confirmed with one application (eg this integration) using the bridge's port - and became unreliable with two (eg this integration and ssh). Different bridges or firmwares versions may support this better. |
+| Serial link not working | It's worth testing the link between your HASS host and the unit, bypassing the integration, to narrow down the cause. Disable the Kramer entry for that unit, then run the command: `(printf '\x05\x80\x81\x81'; sleep 3) \| nc -w 5 IPADDRESS PORT \| od -An -tx1` from a terminal in Home Assistant (replace IPADDRESS and PORT). A working link prints one line of four numbers starting 45. No output means the bridge is reachable but the unit isn't answering: check the serial cable (a null-modem adapter is needed on some models), the bridge's serial settings (9600, 8 data bits, no parity, 1 stop bit, no flow control) and the machine number dip switches on the unit. If it outputs an error such as "Connection refused" or "Timed out", instead of numbers, Home Assistant can't reach the bridge at all. In which case, check the bridge is powered and on the network, its IP address and port are correctly configured, that it is set to Raw TCP, and that nothing else is connected to it. Don't forget to re-enable the integration entry, when you're done. |
 
 ## Credits
 
@@ -275,7 +273,7 @@ this version does not.
 
 The revised code was written with Claude.
 
-This integration was not written by, or with the endorsement or support of, Kramer AV.
+This integration was not written by, or with the endorsement or support of, Kramer AV but serves the very real need of extending the life of models that are no longer supported by the manufacturer.
 
 ## Licence
 

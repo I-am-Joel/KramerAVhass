@@ -43,6 +43,7 @@ class KramerData:
     refresh_seconds: int = 60
     applied_options: dict = field(default_factory=dict)
     protocol: str = PROTOCOL_2000
+    audio_levels: tuple[int, ...] = ()
 
     @property
     def breakaway(self) -> bool:

@@ -200,7 +200,7 @@ async def _handle_set_routing_mode(hass: HomeAssistant, call: ServiceCall) -> No
 
 
 async def _handle_store_preset(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Store the present routing in a slot (refuses an filled slot unless confirmed)."""
+    """Store the present routing in a slot (refuses a filled slot unless confirmed)."""
     for entry in _target_entries(hass, call):
         data = entry.runtime_data
         slot = _resolve_preset_slot(data, call.data[ATTR_SLOT])

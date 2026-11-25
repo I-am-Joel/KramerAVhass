@@ -15,10 +15,12 @@ from .const import DEFAULT_PORT, DEFAULT_VP729_PORT
 OTHER = "other"
 PROTOCOL_2000 = "Protocol 2000"
 PROTOCOL_ASCII = "ASCII"
+PROTOCOL_2BYTE = "2-byte protocol"
 VP729_KEY = "vp-729"  # the VP-729 presentation scaler/switcher (not a matrix, so not in MODELS)
 VP729_NAME = "VP-729"
 MAX_PORTS = 127
 MAX_PRESET_SLOTS = 99
+AUDIO_LEVELS_5X4 = (0, 2, 4, 6)
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,13 @@ class KramerModel:
     preset_slots: int = 0
     notes: str = ""
     default_port: int = DEFAULT_PORT
+    protocol: str = PROTOCOL_2000
+    machine_max: int = 15  # the highest machine number the model can be given
+    audio_levels: tuple[int, ...] = ()  # selectable output levels in dB (empty = no level setting)
+    retry_error: bool = False  # answers "error" while someone is using the front panel, so retry
+    # The next two apply to the 2-byte protocol only.
+    reply_id: int = 0  # bits N6 to N3 of the first byte of the unit's replies
+    has_all: bool = False  # has one command that sends an input to every output
 
 
 MODELS: dict[str, KramerModel] = {
@@ -62,6 +71,64 @@ MODELS: dict[str, KramerModel] = {
         preset_slots=16,
     ),
     "vs-812": KramerModel("vs-812", "VS-812", 8, 1, False, supports_off=False, supports_lock=False),
+    "vs-1202yc": KramerModel(
+        "vs-1202yc",
+        "VS-1202YC",
+        12,
+        2,
+        False,
+        supports_off=False,
+        supports_lock=False,
+        protocol=PROTOCOL_2BYTE,
+        machine_max=8,
+        reply_id=7,
+        notes=(
+            "**Model-specific limits:**\n\n"
+            "- Uses the 2-byte protocol at 1200 baud (8 data bits, no parity, 1 stop bit). "
+            "Set the serial port of your bridge to match.\n"
+            "- Audio always follows video, and outputs cannot be disconnected (the unit refuses it).\n"
+            "- No presets or panel lock."
+        ),
+    ),
+    "vs-5x4": KramerModel(
+        "vs-5x4",
+        "VS-5x4",
+        5,
+        4,
+        False,
+        supports_lock=False,
+        machine_max=8,
+        audio_levels=AUDIO_LEVELS_5X4,
+        retry_error=True,
+        notes=(
+            "**Model-specific limits:**\n\n"
+            "- Uses Protocol 2000 at 9600 baud (8 data bits, no parity, 1 stop bit). "
+            "Set DIP switch 5 OFF and power the unit off and on again after changing it.\n"
+            "- Audio always follows video. Each output has an audio level setting (0, 2, 4 or 6 dB).\n"
+            "- No presets or panel lock."
+        ),
+    ),
+    "vs-5x4-2byte": KramerModel(
+        "vs-5x4-2byte",
+        "VS-5x4",
+        5,
+        4,
+        False,
+        supports_lock=False,
+        protocol=PROTOCOL_2BYTE,
+        machine_max=8,
+        audio_levels=AUDIO_LEVELS_5X4,
+        reply_id=8,
+        has_all=True,
+        notes=(
+            "**Model-specific limits:**\n\n"
+            "- Uses the 2-byte protocol at 9600 baud (8 data bits, no parity, 1 stop bit). "
+            "Set DIP switch 5 ON and power the unit off and on again after changing it. "
+            "Protocol 2000 is recommended for this unit.\n"
+            "- Audio always follows video. Each output has an audio level setting (0, 2, 4 or 6 dB).\n"
+            "- No presets or panel lock."
+        ),
+    ),
 }
 
 # Keys saved by earlier versions, mapped to their current entry.
@@ -110,6 +177,24 @@ def resolve_preset_slots(data: Mapping[str, Any]) -> int:
         return 0
 
 
+def resolve_protocol(data: Mapping[str, Any]) -> str:
+    """Return the protocol a config entry's model talks (unknown models: Protocol 2000)."""
+    key = resolve_model_key(data.get("model"))
+    return MODELS[key].protocol if key else PROTOCOL_2000
+
+
+def resolve_retry_error(data: Mapping[str, Any]) -> bool:
+    """Return whether a model answers "error" while its front panel is in use (so requests are retried)."""
+    key = resolve_model_key(data.get("model"))
+    return MODELS[key].retry_error if key else False
+
+
+def resolve_audio_levels(data: Mapping[str, Any]) -> tuple[int, ...]:
+    """Return the output levels (in dB) a model can be set to; empty if it has no level setting."""
+    key = resolve_model_key(data.get("model"))
+    return MODELS[key].audio_levels if key else ()
+
+
 def resolve_notes(data: Mapping[str, Any]) -> str:
     """Return the notes shipped with a model (empty for unknown models)."""
     key = resolve_model_key(data.get("model"))
@@ -125,12 +210,19 @@ OTHER_LABEL = f"Other ({PROTOCOL_2000} switchers only)"
 
 
 def model_choices() -> list[tuple[str, str]]:
-    """Return (key, label) for the setup dropdown: alphabetical, with "Other" last."""
-    choices = [(m.key, model_label(m.name, PROTOCOL_2000)) for m in MODELS.values()]
-    choices.append((VP729_KEY, model_label(VP729_NAME, PROTOCOL_ASCII)))
-    choices.sort(key=lambda item: item[1].casefold())
+    """Return (key, label) for the setup dropdown: by model name (Protocol 2000 first), with "Other" last."""
+    entries = [(m.name, m.protocol, m.key, model_label(m.name, m.protocol)) for m in MODELS.values()]
+    entries.append((VP729_NAME, PROTOCOL_ASCII, VP729_KEY, model_label(VP729_NAME, PROTOCOL_ASCII)))
+    entries.sort(key=lambda e: (e[0].casefold(), e[1] == PROTOCOL_2BYTE))
+    choices = [(key, label) for _, _, key, label in entries]
     choices.append((OTHER, OTHER_LABEL))
     return choices
+
+
+def machine_max_for(model: str | None) -> int:
+    """Return the highest machine number a model can be given."""
+    key = resolve_model_key(model)
+    return MODELS[key].machine_max if key else 15
 
 
 def default_port_for(model: str | None) -> int:

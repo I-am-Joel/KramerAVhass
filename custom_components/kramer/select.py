@@ -53,6 +53,9 @@ async def async_setup_entry(
                 else f"{base_output_name(name)} Audio"
             )
             entities.append(KramerAudioOutputSelect(entry, number, audio_name))
+    if data.audio_levels:
+        for number, name in enumerate(data.output_names, start=1):
+            entities.append(KramerLevelSelect(entry, number, name))
     if data.supports_modes:
         entities.append(KramerModeSelect(entry))
     async_add_entities(entities)
@@ -193,3 +196,25 @@ class KramerModeSelect(KramerEntity, SelectEntity):
         """Change mode."""
         mode = next(k for k, v in MODE_LABELS.items() if v == option)
         await self._call(self._client.async_set_mode(mode))
+
+
+class KramerLevelSelect(KramerEntity, SelectEntity):
+    """Choose the audio level of one output (units that have a level setting)."""
+
+    def __init__(self, entry: KramerConfigEntry, output: int, name: str) -> None:
+        """Initialise."""
+        super().__init__(entry, f"level_{output}")
+        self._output = output
+        self._attr_name = f"{base_output_name(name)} audio level"
+        self._attr_icon = "mdi:volume-high"
+        self._attr_options = [f"{level} dB" for level in self._data.audio_levels]
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the level the unit reports for this output."""
+        level = self._client.levels.get(self._output)
+        return None if level is None else f"{level} dB"
+
+    async def async_select_option(self, option: str) -> None:
+        """Set this output's level."""
+        await self._call(self._client.async_set_level(self._output, int(option.removesuffix(" dB"))))

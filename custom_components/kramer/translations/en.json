@@ -39,7 +39,7 @@
     },
     "error": {
       "cannot_connect": "Could not connect. Check the IP address and port.",
-      "no_reply": "Connected, but the switcher did not answer. Check the cable, the machine number and the bridge's serial settings. If this unit is a VP-729, choose that model instead.",
+      "no_reply": "Connected, but the switcher did not answer. Check the cable, the machine number and the serial settings. If this unit is a VP-729, choose that model instead.",
       "no_reply_vp729": "Connected, but nothing answered like a VP-729. Check that this is the VP-729's Ethernet port (5000 unless changed), that no password is required on that port, and that the model chosen is right.",
       "type_change": "A VP-729 and a matrix switcher cannot be swapped by reconfiguring. Add the unit again as a new entry with the right model instead."
     },

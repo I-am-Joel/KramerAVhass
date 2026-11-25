@@ -42,6 +42,8 @@ INSTR_STORE_AUDIO = 19
 INSTR_RECALL_AUDIO = 20
 INSTR_IDENTIFY = 61
 INSTR_LOCK_PANEL = 30
+INSTR_SET_LEVEL = 22  # set (or, from the unit, announce) an output's audio level
+INSTR_REQUEST_LEVEL = 25  # ask for an output's audio level
 INSTR_REQUEST_LOCK = 31
 
 # Values of instruction 8 that the VS-162AV accepts (it answers 1 for
@@ -220,6 +222,10 @@ async def async_probe(host: str, port: int, machine: int, timeout: float = 5.0) 
         await _close(writer)
 
 
+class _IdentityDone(Exception):
+    """Stops the identity questions early (internal)."""
+
+
 class KramerClient:
     """Keeps one connection to a Kramer matrix and tracks its state."""
 
@@ -237,8 +243,14 @@ class KramerClient:
         retry_interval: float = 10.0,
         reconnect_delay: float = 5.0,
         request_timeout: float = 1.5,
+        supports_lock: bool = True,
+        audio_levels: tuple[int, ...] = (),
+        retry_error: bool = False,
     ) -> None:
         """Initialise the client (nothing connects until async_start)."""
+        self._audio_levels = tuple(audio_levels)
+        self._busy_wait = 1.0
+        self._retry_error = retry_error
         self._host = host
         self._port = port
         self._machine = machine
@@ -264,7 +276,8 @@ class KramerClient:
         self.audio_routes: dict[int, int] = {}
         self.mode: int | None = None
         self.locked: bool | None = None
-        self.lock_supported: bool | None = None
+        self.lock_supported: bool | None = None if supports_lock else False
+        self.levels: dict[int, int] = {}
         self.audio_supported: bool | None = None
         self.preset_defined: dict[int, bool] = {}
         self.identity: dict[str, object] = {}
@@ -462,6 +475,28 @@ class KramerClient:
         if reply.output != mode:
             raise KramerCommandError(f"The unit stayed in mode {reply.output} instead of {mode}")
 
+    @property
+    def audio_levels(self) -> tuple[int, ...]:
+        """Return the output levels (dB) the unit can be set to; empty if it has none."""
+        return self._audio_levels
+
+    async def async_set_level(self, output: int, level: int) -> None:
+        """Set one output's audio level (in dB, one of the model's allowed values)."""
+        if not self._audio_levels:
+            raise KramerError("This unit has no audio level setting")
+        if not 1 <= output <= self._outputs:
+            raise KramerError(f"Output {output} is out of range")
+        if level not in self._audio_levels:
+            raise KramerError(f"Level {level} dB is not available")
+        # The unit does no range checking of its own, so only validated values are ever sent.
+        await self._request(
+            build_packet(INSTR_SET_LEVEL, output, level, self._machine),
+            INSTR_SET_LEVEL,
+            lambda p: p.input == output,
+        )
+        self.levels = {**self.levels, output: level}
+        self._notify()
+
     async def async_set_lock(self, locked: bool) -> None:
         """Lock or unlock the front panel."""
         value = 1 if locked else 0
@@ -500,7 +535,8 @@ class KramerClient:
             return packet.instruction in accepted and (extra is None or extra(packet))
 
         async with self._lock:
-            for attempt in range(attempts):
+            total = attempts + (3 if self._retry_error else 0)
+            for attempt in range(total):
                 writer = self._writer
                 if writer is None or writer.is_closing():
                     raise KramerConnectionError("Not connected")
@@ -515,7 +551,7 @@ class KramerClient:
                         "No reply to %s (attempt %s of %s)",
                         data.hex(),
                         attempt + 1,
-                        attempts,
+                        total,
                     )
                     continue
                 except OSError as err:
@@ -524,6 +560,10 @@ class KramerClient:
                     self._pending = None
                 if reply.instruction == INSTR_ERROR:
                     code = reply.output & 0x7F
+                    if code == 0 and self._retry_error and attempt < total - 1:
+                        # Answered while someone is using the front panel: wait and ask again.
+                        await asyncio.sleep(self._busy_wait)
+                        continue
                     message = f"Unit reported: {_ERROR_CODES.get(code, code)}"
                     if not quiet:
                         self._record_error(message)
@@ -574,8 +614,11 @@ class KramerClient:
                     _LOGGER.debug("Unit is not answering; will retry")
                     self._set_available(False)
                 except KramerCommandError as err:
-                    _LOGGER.warning("Unit rejected a status request: %s", err)
-                    self._set_available(False)
+                    if self._retry_error and self.available:
+                        _LOGGER.debug("Unit is busy or refused a status request: %s", err)
+                    else:
+                        _LOGGER.warning("Unit rejected a status request: %s", err)
+                        self._set_available(False)
 
                 interval = self._refresh_interval if self.available else self._retry_interval
                 self._refresh_event.clear()
@@ -637,6 +680,10 @@ class KramerClient:
         elif instruction == INSTR_SWITCH_AUDIO:
             self._apply_audio_route(packet.output, packet.input)
             self._notify()
+        elif instruction == INSTR_SET_LEVEL and self._audio_levels:
+            if 1 <= packet.input <= self._outputs and packet.output in self._audio_levels:
+                self.levels = {**self.levels, packet.input: packet.output}
+                self._notify()
         elif instruction == INSTR_BREAKAWAY and packet.input == 0:
             previous = self.mode
             self.mode = packet.output
@@ -748,10 +795,22 @@ class KramerClient:
                 locked = reply.output == 1
                 self.lock_supported = True
 
+        levels = dict(self.levels)
+        if self._audio_levels:
+            for output in range(1, self._outputs + 1):
+                reply = await self._request(
+                    build_packet(INSTR_REQUEST_LEVEL, output, 0, self._machine),
+                    INSTR_REQUEST_LEVEL,
+                    lambda p, o=output: p.input == o,
+                )
+                if reply.output in self._audio_levels:
+                    levels[output] = reply.output
+
         self.routes = routes
         self.audio_routes = audio
         self.mode = mode
         self.locked = locked
+        self.levels = levels
         self._ready.set()
         if not self.available:
             self._set_available(True)
@@ -776,6 +835,11 @@ class KramerClient:
             reply = await self._identify(1, 0)
             info["name_raw"] = [reply.input, reply.output]
             info["number"] = f"{reply.input:02d}{reply.output:02d}".lstrip("0")
+            if self._audio_levels:  # the VS-5x4 answers only the model and firmware questions
+                reply = await self._identify(3, 0)
+                info["firmware_raw"] = [reply.input, reply.output]
+                info["firmware"] = f"{reply.input}.{reply.output}"
+                raise _IdentityDone
             reply = await self._identify(1, 1)
             info["suffix"] = "".join(chr(b) for b in (reply.input, reply.output) if 32 < b < 127)
             reply = await self._identify(3, 0)
@@ -783,6 +847,8 @@ class KramerClient:
             info["firmware"] = f"{reply.input}.{reply.output}"
             reply = await self._identify(4, 0)
             info["audio_firmware"] = f"{reply.input}.{reply.output}"
+        except _IdentityDone:
+            pass
         except (KramerTimeoutError, KramerCommandError) as err:
             _LOGGER.debug("Unit did not answer every identity question: %s", err)
         self.identity = info

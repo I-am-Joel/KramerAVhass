@@ -37,15 +37,22 @@ from .const import (
 )
 from .entity import KramerConfigEntry, KramerData, Vp729Data
 from .models import (
+    MODELS,
+    PROTOCOL_2BYTE,
     is_vp729,
+    resolve_audio_levels,
+    resolve_model_key,
     resolve_model_name,
     resolve_preset_slots,
+    resolve_protocol,
+    resolve_retry_error,
     resolve_supports_lock,
     resolve_supports_off,
 )
 from .presets import parse_descriptions
 from .protocol import KramerClient
 from .services import async_register_services
+from .twobyte import KramerTwoByteClient, TwoByteSpec
 from .vp729_protocol import Vp729Client
 
 _LOGGER = logging.getLogger(__name__)
@@ -146,16 +153,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
     custom_refresh, refresh_seconds = refresh_settings(entry.options)
     preset_slots = resolve_preset_slots(data)
     breakaway = bool(data.get(CONF_MODES, True))
-    client = KramerClient(
-        data[CONF_HOST],
-        int(data.get(CONF_PORT, DEFAULT_PORT)),
-        int(data.get(CONF_MACHINE, DEFAULT_MACHINE)),
-        inputs,
-        outputs,
-        supports_modes=bool(data.get(CONF_MODES, True)),
-        preset_slots=preset_slots,
-        refresh_interval=effective_refresh(custom_refresh, refresh_seconds),
-    )
+    protocol = resolve_protocol(data)
+    levels = resolve_audio_levels(data)
+    if protocol == PROTOCOL_2BYTE:
+        model = MODELS[resolve_model_key(data.get("model"))]
+        client: KramerClient = KramerTwoByteClient(
+            data[CONF_HOST],
+            int(data.get(CONF_PORT, DEFAULT_PORT)),
+            int(data.get(CONF_MACHINE, DEFAULT_MACHINE)),
+            TwoByteSpec(
+                model.reply_id, inputs, outputs, model.has_all, model.supports_off, bool(model.audio_levels)
+            ),
+            audio_levels=levels,
+            refresh_interval=effective_refresh(custom_refresh, refresh_seconds),
+        )
+    else:
+        client = KramerClient(
+            data[CONF_HOST],
+            int(data.get(CONF_PORT, DEFAULT_PORT)),
+            int(data.get(CONF_MACHINE, DEFAULT_MACHINE)),
+            inputs,
+            outputs,
+            supports_modes=bool(data.get(CONF_MODES, True)),
+            preset_slots=preset_slots,
+            refresh_interval=effective_refresh(custom_refresh, refresh_seconds),
+            supports_lock=resolve_supports_lock(data),
+            audio_levels=levels,
+            retry_error=resolve_retry_error(data),
+        )
     output_names = effective_names(
         entry.options.get(CONF_OUTPUT_NAMES),
         default_output_names(outputs, " Video" if breakaway else ""),
@@ -192,6 +217,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         custom_refresh=custom_refresh,
         refresh_seconds=refresh_seconds,
         applied_options=_without_refresh(entry.options),
+        protocol=protocol,
+        audio_levels=levels,
     )
 
     await client.async_start()

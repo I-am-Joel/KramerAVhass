@@ -58,14 +58,17 @@ from .models import (
     MAX_PRESET_SLOTS,
     MODELS,
     OTHER,
+    PROTOCOL_2BYTE,
     VP729_KEY,
     VP729_NAME,
     default_port_for,
     is_vp729,
+    machine_max_for,
     model_choices,
     resolve_model_key,
     resolve_notes,
     resolve_preset_slots,
+    resolve_protocol,
 )
 from .presets import (
     parse_descriptions,
@@ -80,6 +83,7 @@ from .protocol import (
     KramerTimeoutError,
     async_probe,
 )
+from .twobyte import async_probe_two_byte
 from .vp729_protocol import async_probe_vp729
 
 CONF_NAME = "name"
@@ -132,6 +136,8 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 if vp729:
                     await async_probe_vp729(host, port)
+                elif resolve_protocol(data) == PROTOCOL_2BYTE:
+                    await async_probe_two_byte(host, port, machine, MODELS[resolve_model_key(data.get(CONF_MODEL))].reply_id)
                 else:
                     await async_probe(host, port, machine)
             except KramerTimeoutError:
@@ -230,7 +236,7 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_PORT, default=port): _number(1, 65535),
         }
         if not vp729:
-            fields[vol.Required(CONF_MACHINE, default=int(cur.get(CONF_MACHINE, DEFAULT_MACHINE)))] = _number(1, 15)
+            fields[vol.Required(CONF_MACHINE, default=int(cur.get(CONF_MACHINE, DEFAULT_MACHINE)))] = _number(1, machine_max_for(model))
         note = (
             "Its Ethernet port is 5000 unless changed on the unit's network module, and \"Password Required\" "
             "on that port must be set to No."

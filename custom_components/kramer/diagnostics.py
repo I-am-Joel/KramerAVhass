@@ -72,7 +72,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
             "supports_lock": data.supports_lock,
             "lock_supported_by_unit": client.lock_supported,
             "preset_slots": data.preset_slots,
+            "audio_levels": list(data.audio_levels),
         },
+        "protocol": data.protocol,
         "identity": dict(client.identity),
         "state": {
             "available": client.available,
@@ -80,6 +82,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
             "locked": client.locked,
             "routes": dict(client.routes),
             "audio_routes": dict(client.audio_routes),
+            "levels": dict(client.levels),
             "filled_preset_slots": sorted(slot for slot, filled in client.preset_defined.items() if filled),
             "last_reply": client.last_reply.isoformat() if client.last_reply else None,
             "last_error": client.last_error,

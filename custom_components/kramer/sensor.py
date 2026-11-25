@@ -264,20 +264,20 @@ class KramerStoredPresetsSensor(KramerEntity, SensorEntity):
 
     @property
     def native_value(self) -> int | None:
-        """Return the number of occupied slots."""
+        """Return the number of filled slots."""
         if not self._client.preset_defined:
             return None
-        return sum(1 for occupied in self._client.preset_defined.values() if occupied)
+        return sum(1 for filled in self._client.preset_defined.values() if filled)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the occupied slots with their HASS descriptions (held in Home Assistant, not on the unit)."""
-        occupied = {
+        """Return the filled slots with their HASS descriptions (held in Home Assistant, not on the unit)."""
+        filled_presets = {
             f"Preset {slot:02d}": self._data.preset_descriptions.get(slot, "(no HASS description)")
             for slot, filled in sorted(self._client.preset_defined.items())
             if filled
         }
-        return {"filled_presets": occupied, "presets_on_unit": self._client.preset_slots}
+        return {"filled_presets": filled_presets, "presets_on_unit": self._client.preset_slots}
 
 
 STATUS_SCHEMA_VERSION = 1
@@ -386,4 +386,8 @@ class KramerStatusSensor(KramerEntity, SensorEntity):
                 "time": client.last_error_time.isoformat() if client.last_error_time else None,
             },
             "locked": client.locked if online else None,
+            "audio_levels": {
+                "available": list(data.audio_levels),
+                "outputs": {str(output): level for output, level in sorted(client.levels.items())} if online else {},
+            },
         }

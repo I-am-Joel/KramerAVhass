@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "Kramer switcher or scaler",
-        "description": "Choose the model. The next screen asks for its address.",
+        "description": "Configure for use with your connected device",
         "data": {
           "model": "Model"
         }
       },
       "reconfigure": {
         "title": "Reconfigure Kramer unit",
-        "description": "Choose the model. The next screen asks for its address.",
+        "description": "Configure for use with your connected device",
         "data": {
           "model": "Model"
         }
@@ -35,13 +35,23 @@
           "port": "Port",
           "machine": "Machine number (1 unless daisy-chained)"
         }
+      },
+      "shared": {
+        "title": "Address already used",
+        "description": "{entry} already uses {host}:{port} and is disabled. Only one device can use this address at a time. Either assign a unique IP/port combination, or keep {entry} disabled while this one is enabled, and disable this one before enabling {entry} again.",
+        "menu_options": {
+          "shared_continue": "Continue, using this address",
+          "connection": "Go back and change the address"
+        }
       }
     },
     "error": {
       "cannot_connect": "Could not connect. Check the IP address and port.",
       "no_reply": "Connected, but the switcher did not answer. Check the cable, the machine number and the serial settings. If this unit is a VP-729, choose that model instead.",
       "no_reply_vp729": "Connected, but nothing answered like a VP-729. Check that this is the VP-729's Ethernet port (5000 unless changed), that no password is required on that port, and that the model chosen is right.",
-      "type_change": "A VP-729 and a matrix switcher cannot be swapped by reconfiguring. Add the unit again as a new entry with the right model instead."
+      "type_change": "A VP-729 and a matrix switcher cannot be swapped by reconfiguring. Add the unit again as a new entry with the right model instead.",
+      "name_in_use": "A Kramer device called \"{name}\" already exists. This integration requires that each device has a unique name, so please choose a different one.",
+      "address_in_use": "\"{entry}\" is enabled and already uses {host}:{port}. Either use a different IP/port for this device, or disable \"{entry}\" first and then add this one."
     },
     "abort": {
       "already_configured": "This switcher is already set up.",

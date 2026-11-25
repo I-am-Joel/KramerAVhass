@@ -9,10 +9,11 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryError
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
+from .address import blocking_entry
 from .const import (
     CONF_AUDIO_INPUT_NAMES,
     CONF_AUDIO_OUTPUT_NAMES,
@@ -139,6 +140,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
     """Set up a unit from a config entry."""
     data = entry.data
+    if (holder := blocking_entry(hass, entry)) is not None:
+        # Two enabled devices cannot share an IP address and port, so this one waits (and retries) without connecting.
+        raise ConfigEntryNotReady(
+            f'Another enabled Kramer device ("{holder.title}") is configured to use the same IP/port as this device, '
+            "which prevents this device from connecting. Devices cannot share an IP/port while both are enabled. "
+            "Either reconfigure one to use a unique IP/port, or disable one of them in Home Assistant."
+        )
     if is_vp729(data):
         return await _setup_vp729(hass, entry)
     try:

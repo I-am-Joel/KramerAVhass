@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import voluptuous as vol
@@ -32,6 +33,7 @@ from . import (
     legacy_input_names,
     legacy_output_names,
 )
+from .address import entries_at_address, name_in_use
 from .const import (
     CONF_AUDIO_INPUT_NAMES,
     CONF_AUDIO_OUTPUT_NAMES,
@@ -108,6 +110,9 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._data: dict[str, Any] = {}
         self._model: str | None = None
         self._carried: dict[str, str] = {}
+        self._shared_ok = False
+        self._pending: dict[str, Any] | None = None
+        self._shared_names = ""
 
     # -- helpers --------------------------------------------------------
 
@@ -153,8 +158,8 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         title = data.pop(CONF_NAME)
         if self.source == "reconfigure":
             return self.async_update_reload_and_abort(self._get_reconfigure_entry(), title=title, data=data)
-        await self.async_set_unique_id(f"{host}:{port}:vp729" if vp729 else f"{host}:{port}:{machine}")
-        self._abort_if_unique_id_configured()
+        # Each device gets its own identity, so two devices can share an address (only one enabled at a time).
+        await self.async_set_unique_id(f"{host}:{port}:{uuid.uuid4().hex[:8]}")
         return self.async_create_entry(title=title, data=data)
 
     # -- steps ----------------------------------------------------------
@@ -195,6 +200,7 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         cur = self._current()
         model = self._model or VP729_KEY
         vp729 = model == VP729_KEY
+        shared_ok, self._shared_ok = self._shared_ok, False
         if user_input is not None:
             self._data.update(
                 {
@@ -203,6 +209,28 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_PORT: int(user_input[CONF_PORT]),
                 }
             )
+            own_id = self._get_reconfigure_entry().entry_id if self.source == "reconfigure" else None
+            placeholders: dict[str, str] = {}
+            if name_in_use(self.hass, self._data[CONF_NAME], own_id):
+                errors["base"] = "name_in_use"
+                placeholders = {"name": self._data[CONF_NAME]}
+            else:
+                sharing = entries_at_address(self.hass, self._data[CONF_HOST], self._data[CONF_PORT], own_id)
+                enabled = [entry for entry in sharing if entry.disabled_by is None]
+                if enabled:
+                    errors["base"] = "address_in_use"
+                    placeholders = {
+                        "entry": enabled[0].title,
+                        "host": self._data[CONF_HOST],
+                        "port": str(self._data[CONF_PORT]),
+                    }
+                elif sharing and not shared_ok:
+                    self._pending = user_input
+                    self._shared_names = ", ".join(f'"{entry.title}"' for entry in sharing)
+                    return await self.async_step_shared()
+            if errors:
+                cur = {**cur, **user_input}  # keep what was typed
+                return self._connection_form(cur, errors, model, vp729, placeholders)
             if vp729:
                 self._data.pop(CONF_MACHINE, None)
                 self._data.update({CONF_MODEL: VP729_KEY, CONF_MODEL_NAME: VP729_NAME})
@@ -225,6 +253,17 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
                 return result
             cur = {**cur, **user_input}  # an error: keep what was typed
 
+        return self._connection_form(cur, errors, model, vp729)
+
+    def _connection_form(
+        self,
+        cur: dict[str, Any],
+        errors: dict[str, str],
+        model: str,
+        vp729: bool,
+        extra: dict[str, str] | None = None,
+    ) -> ConfigFlowResult:
+        """Show the name and address screen."""
         label = dict(model_choices())[model]
         # Keep a saved port when the unit is being reconfigured as the same kind of unit.
         saved = self._get_reconfigure_entry().data if self.source == "reconfigure" else {}
@@ -247,8 +286,26 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="connection",
             data_schema=vol.Schema(fields),
             errors=errors,
-            description_placeholders={"model": label, "note": note},
+            description_placeholders={"model": label, "note": note, **(extra or {})},
         )
+
+
+    async def async_step_shared(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Tell the user another (disabled) device already uses this address; they continue or go back."""
+        return self.async_show_menu(
+            step_id="shared",
+            menu_options=["shared_continue", "connection"],
+            description_placeholders={
+                "entry": self._shared_names,
+                "host": self._data[CONF_HOST],
+                "port": str(self._data[CONF_PORT]),
+            },
+        )
+
+    async def async_step_shared_continue(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """The user accepted sharing the address with the disabled device(s)."""
+        self._shared_ok = True
+        return await self.async_step_connection(self._pending)
 
     async def async_step_other(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Third screen for models not in the library."""

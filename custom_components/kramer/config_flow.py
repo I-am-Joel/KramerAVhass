@@ -303,7 +303,7 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_shared_continue(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """The user accepted sharing the address with the disabled device(s)."""
+        """Continue after the user accepted sharing the address with the disabled device(s)."""
         self._shared_ok = True
         return await self.async_step_connection(self._pending)
 

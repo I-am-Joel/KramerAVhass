@@ -461,8 +461,7 @@ class Sp11dClient:
             _LOGGER.debug("The unit did not answer the identify request")
 
     async def _identify(self, what: int) -> tuple[int, int]:
-        reply = await self._request(bytes([IDENTIFY, 0x80 | what, 0x80, self._address]), IDENTIFY, None)
-        return reply
+        return await self._request(bytes([IDENTIFY, 0x80 | what, 0x80, self._address]), IDENTIFY, None)
 
     async def _read_loop(self, reader: asyncio.StreamReader) -> None:
         """Read messages until the connection closes."""

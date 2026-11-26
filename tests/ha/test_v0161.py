@@ -45,7 +45,7 @@ async def to_connection(hass, model):
 
 
 def details(name, port):
-    """Connection form input."""
+    """Return the connection form input."""
     return {"name": name, "ip_address": "127.0.0.1", "port": port, "machine": 1}
 
 

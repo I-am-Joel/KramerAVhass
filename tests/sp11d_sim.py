@@ -44,9 +44,9 @@ class Sp11dSim:
     def __init__(self, address: int = 0x98) -> None:
         """Set up the state."""
         self.address = address
-        self.presets = [{p: 0 for p in PER_PRESET} for _ in range(16)]
+        self.presets = [dict.fromkeys(PER_PRESET, 0) for _ in range(16)]
         self.presets[0].update({1: 1, 5: 2, 14: -6})
-        self.live: dict[int, int] = {p: 0 for p in range(29)}
+        self.live: dict[int, int] = dict.fromkeys(range(29), 0)
         self.live[20] = 2
         self.live[21] = 2
         self.live[28] = -33
@@ -142,7 +142,7 @@ class Sp11dSim:
                 self.presets[number] = {p: self.live[p] for p in PER_PRESET}
                 self.announce_recall(writer)
         elif instruction == 0 and param == 1:
-            self.presets = [{p: 0 for p in PER_PRESET} for _ in range(16)]
+            self.presets = [dict.fromkeys(PER_PRESET, 0) for _ in range(16)]
             self.load(0)
             self.announce_recall(writer)
         elif instruction == 61:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -251,6 +253,12 @@ async def test_sp11d_unavailable_when_silent(hass: HomeAssistant) -> None:
 # ---- config flow -------------------------------------------------------------------------------
 
 
+def _translations() -> dict:
+    """Return the integration's English strings."""
+    return json.loads(Path("custom_components/kramer/translations/en.json").read_text())
+
+
+
 async def to_connection(hass, model):
     """Start the flow and choose a model."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
@@ -306,21 +314,13 @@ async def test_flow_blank_name_refused(hass: HomeAssistant) -> None:
             result["flow_id"], {"name": blank, "ip_address": "127.0.0.1", "port": 9, "machine": 1}
         )
         assert result["type"] == "form" and result["errors"] == {"name": "name_required"}
-    import json
-    from pathlib import Path
-
-    from custom_components.kramer import config_flow  # noqa: F401
-
-    text = json.loads(Path("custom_components/kramer/translations/en.json").read_text())
+    text = _translations()
     assert text["config"]["error"]["name_required"] == "Please enter a name for this device."
 
 
 async def test_no_reply_wording() -> None:
     """The matrix no-reply message is the approved wording."""
-    import json
-    from pathlib import Path
-
-    text = json.loads(Path("custom_components/kramer/translations/en.json").read_text())
+    text = _translations()
     assert text["config"]["error"]["no_reply"] == (
         "Connected, but the device did not answer. Check the cable and that the protocol, model chosen, "
         "machine number and serial settings - including baud rate - match the device."
@@ -406,10 +406,7 @@ def test_every_model_states_its_serial_settings() -> None:
 
 async def test_approved_sp11d_wording() -> None:
     """The SP-11D no-reply message and the reconfigure message are the approved wording."""
-    import json
-    from pathlib import Path
-
-    errors = json.loads(Path("custom_components/kramer/translations/en.json").read_text())["config"]["error"]
+    errors = _translations()["config"]["error"]
     assert errors["no_reply_sp11d"] == (
         "Connected, but the device did not answer. Check the cable and that the model chosen and serial settings - "
         "including baud rate - match the device's configuration. Also check the DIP switches on the device are "

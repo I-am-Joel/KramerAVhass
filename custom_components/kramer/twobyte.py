@@ -42,8 +42,27 @@ MAX_BUFFER = 64
 class TwoByteSpec:
     """What differs between the models that talk the 2-byte protocol."""
 
-    def __init__(self, reply_id: int, inputs: int, outputs: int, has_all: bool, has_off: bool, levels: bool) -> None:
-        """Store the model's facts."""
+    def __init__(
+        self,
+        reply_id: int,
+        inputs: int,
+        outputs: int,
+        has_all: bool,
+        has_off: bool,
+        levels: bool,
+        off_command_base: int = 25,
+        off_all_command: int = 30,
+        off_status_base: int = 20,
+    ) -> None:
+        """Store the model's facts.
+
+        The last three say how an output is switched off: the code to send is the base plus the
+        output number, the code that switches every output off, and the base of the code the
+        unit reports for an output that is off.
+        """
+        self.off_command_base = off_command_base
+        self.off_all_command = off_all_command
+        self.off_status_base = off_status_base
         self.reply_id = reply_id
         self.inputs = inputs
         self.outputs = outputs
@@ -192,7 +211,7 @@ class KramerTwoByteClient(KramerClient):
         if input_number == 0:
             if not spec.has_off:
                 raise KramerError("This unit cannot disconnect an output")
-            value = 30 if output == 0 else 25 + output
+            value = spec.off_all_command if output == 0 else spec.off_command_base + output
         elif output == 0:
             if spec.has_all:
                 value = 20 + input_number
@@ -350,8 +369,8 @@ class KramerTwoByteClient(KramerClient):
             route = spec.decode_route(value)
             if route and route[0] == position:
                 routes[position] = route[1]
-            elif spec.has_off and 21 <= value <= 24:
-                routes[position] = 0  # an output that is switched off shows as 20 + its position
+            elif spec.has_off and spec.off_status_base + 1 <= value <= spec.off_status_base + spec.outputs:
+                routes[position] = 0  # an output that is switched off shows as the base + its position
             elif route:
                 routes[route[0]] = route[1]
         if spec.levels:

@@ -17,8 +17,7 @@ from .entity import (
     input_to_name,
     link_icon,
     name_to_input,
-    reject_mixed,
-    source_options_with_mixed,
+    source_options_for_status,
 )
 
 
@@ -48,7 +47,7 @@ class KramerMediaPlayer(KramerEntity, MediaPlayerEntity):
     @property
     def source_list(self) -> list[str]:
         """Return the selectable sources."""
-        return source_options_with_mixed(self._data)
+        return source_options_for_status(self._data)
 
     @property
     def source(self) -> str:
@@ -68,5 +67,5 @@ class KramerMediaPlayer(KramerEntity, MediaPlayerEntity):
     async def async_select_source(self, source: str) -> None:
         """Send a source to all outputs, for video and (in breakaway mode) audio."""
         if source == SOURCE_MIXED:
-            reject_mixed()
+            return  # Mixed is only a status: choosing it changes nothing
         await self._call(self._client.async_set_all_layers(0, name_to_input(self._data, source)))

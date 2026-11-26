@@ -33,10 +33,11 @@ from . import (
     legacy_input_names,
     legacy_output_names,
 )
-from .address import entries_at_address, name_in_use
+from .address import entries_at_address, name_in_use, unique_default_name
 from .const import (
     CONF_AUDIO_INPUT_NAMES,
     CONF_AUDIO_OUTPUT_NAMES,
+    CONF_DIP8,
     CONF_HOST,
     CONF_INPUT_NAMES,
     CONF_INPUTS,
@@ -56,14 +57,21 @@ from .const import (
 )
 from .entity import KramerData
 from .models import (
+    DIP8_OFF,
+    DIP8_ON,
     MAX_PORTS,
     MAX_PRESET_SLOTS,
     MODELS,
     OTHER,
     PROTOCOL_2BYTE,
+    SP11D_KEY,
+    SP11D_NAME,
     VP729_KEY,
     VP729_NAME,
+    default_name_for,
     default_port_for,
+    dip8_address,
+    is_sp11d,
     is_vp729,
     machine_max_for,
     model_choices,
@@ -85,10 +93,16 @@ from .protocol import (
     KramerTimeoutError,
     async_probe,
 )
+from .sp11d_protocol import async_probe_sp11d
 from .twobyte import async_probe_two_byte
 from .vp729_protocol import async_probe_vp729
 
 CONF_NAME = "name"
+
+
+def _kind(model: str | None) -> str:
+    """Return the kind of device a model is: matrix switcher, VP-729 or SP-11D (they cannot be swapped)."""
+    return "vp729" if model == VP729_KEY else "sp11d" if model == SP11D_KEY else "matrix"
 
 
 def _number(minimum: int, maximum: int) -> NumberSelector:
@@ -98,6 +112,11 @@ def _number(minimum: int, maximum: int) -> NumberSelector:
 def _model_selector() -> SelectSelector:
     options = [{"value": key, "label": label} for key, label in model_choices()]
     return SelectSelector(SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN))
+
+
+def _no_reply_key(vp729: bool, sp11d: bool) -> str:
+    """Return the translation key of the "connected, but no answer" error for this kind of device."""
+    return "no_reply_vp729" if vp729 else "no_reply_sp11d" if sp11d else "no_reply"
 
 
 class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -127,6 +146,7 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         """Test the connection and save. Returns None if there were errors."""
         data = self._data
         vp729 = is_vp729(data)
+        sp11d = is_sp11d(data)
         host, port = data[CONF_HOST], data[CONF_PORT]
         machine = data.get(CONF_MACHINE, DEFAULT_MACHINE)
         skip_probe = False
@@ -135,24 +155,26 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             skip_probe = (
                 old.get(CONF_HOST) == host
                 and int(old.get(CONF_PORT, 0)) == port
-                and (vp729 or int(old.get(CONF_MACHINE, 0)) == machine)
+                and (vp729 or (old.get(CONF_DIP8) == data.get(CONF_DIP8) if sp11d else int(old.get(CONF_MACHINE, 0)) == machine))
             )
         if not skip_probe:
             try:
                 if vp729:
                     await async_probe_vp729(host, port)
+                elif sp11d:
+                    await async_probe_sp11d(host, port, dip8_address(data.get(CONF_DIP8)))
                 elif resolve_protocol(data) == PROTOCOL_2BYTE:
                     await async_probe_two_byte(host, port, machine, MODELS[resolve_model_key(data.get(CONF_MODEL))].reply_id)
                 else:
                     await async_probe(host, port, machine)
             except KramerTimeoutError:
-                errors["base"] = "no_reply_vp729" if vp729 else "no_reply"
+                errors["base"] = _no_reply_key(vp729, sp11d)
                 return None
             except KramerConnectionError:
                 errors["base"] = "cannot_connect"
                 return None
             except KramerError:
-                errors["base"] = "no_reply_vp729" if vp729 else "no_reply"
+                errors["base"] = _no_reply_key(vp729, sp11d)
                 return None
 
         title = data.pop(CONF_NAME)
@@ -170,8 +192,8 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         cur = self._current()
         if user_input is not None:
             model = user_input[CONF_MODEL]
-            if self.source == "reconfigure" and (model == VP729_KEY) != is_vp729(self._get_reconfigure_entry().data):
-                # A VP-729 and a matrix switcher are different kinds of unit: add a new entry instead.
+            if self.source == "reconfigure" and _kind(model) != _kind(self._get_reconfigure_entry().data.get(CONF_MODEL)):
+                # A matrix switcher, a VP-729 and an SP-11D are different kinds of device: add a new entry instead.
                 errors["base"] = "type_change"
                 return self._model_form({**cur, CONF_MODEL: model}, errors)
             if model != self._model:
@@ -184,7 +206,7 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         """Show the model screen."""
         choices = [key for key, _ in model_choices()]
         current = cur.get(CONF_MODEL)
-        default = resolve_model_key(current) or (current if current in (OTHER, VP729_KEY) else choices[0])
+        default = resolve_model_key(current) or (current if current in (OTHER, VP729_KEY, SP11D_KEY) else choices[0])
         schema = vol.Schema({vol.Required(CONF_MODEL, default=default): _model_selector()})
         step = "reconfigure" if self.source == "reconfigure" else "user"
         return self.async_show_form(step_id=step, data_schema=schema, errors=errors)
@@ -200,6 +222,7 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
         cur = self._current()
         model = self._model or VP729_KEY
         vp729 = model == VP729_KEY
+        sp11d = model == SP11D_KEY
         shared_ok, self._shared_ok = self._shared_ok, False
         if user_input is not None:
             self._data.update(
@@ -211,7 +234,9 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             own_id = self._get_reconfigure_entry().entry_id if self.source == "reconfigure" else None
             placeholders: dict[str, str] = {}
-            if name_in_use(self.hass, self._data[CONF_NAME], own_id):
+            if not self._data[CONF_NAME]:
+                errors[CONF_NAME] = "name_required"
+            elif name_in_use(self.hass, self._data[CONF_NAME], own_id):
                 errors["base"] = "name_in_use"
                 placeholders = {"name": self._data[CONF_NAME]}
             else:
@@ -234,6 +259,11 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
             if vp729:
                 self._data.pop(CONF_MACHINE, None)
                 self._data.update({CONF_MODEL: VP729_KEY, CONF_MODEL_NAME: VP729_NAME})
+            elif sp11d:
+                self._data.pop(CONF_MACHINE, None)
+                self._data.update(
+                    {CONF_MODEL: SP11D_KEY, CONF_MODEL_NAME: SP11D_NAME, CONF_DIP8: user_input[CONF_DIP8]}
+                )
             else:
                 self._data[CONF_MACHINE] = int(user_input[CONF_MACHINE])
                 if model == OTHER:
@@ -265,21 +295,34 @@ class KramerConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Show the name and address screen."""
         label = dict(model_choices())[model]
+        sp11d = model == SP11D_KEY
         # Keep a saved port when the unit is being reconfigured as the same kind of unit.
         saved = self._get_reconfigure_entry().data if self.source == "reconfigure" else {}
-        same_kind = bool(saved) and is_vp729(saved) == vp729
+        same_kind = bool(saved) and _kind(saved.get(CONF_MODEL)) == _kind(model)
         port = int(cur[CONF_PORT]) if CONF_PORT in cur and (same_kind or self._data.get(CONF_PORT)) else default_port_for(model)
+        # The name starts as the model's name (numbered if that is taken); "Other" starts empty and is required.
+        name = cur.get(CONF_NAME) or unique_default_name(self.hass, default_name_for(model))
+        name_key = vol.Required(CONF_NAME, default=name) if name else vol.Required(CONF_NAME)
         fields: dict[Any, Any] = {
-            vol.Required(CONF_NAME, default=cur.get(CONF_NAME, "Kramer VP-729" if vp729 else "Kramer Matrix")): TextSelector(),
+            name_key: TextSelector(),
             vol.Required(CONF_HOST, default=cur.get(CONF_HOST, "")): TextSelector(),
             vol.Required(CONF_PORT, default=port): _number(1, 65535),
         }
-        if not vp729:
+        if sp11d:
+            fields[vol.Required(CONF_DIP8, default=cur.get(CONF_DIP8, DIP8_OFF))] = SelectSelector(
+                SelectSelectorConfig(
+                    options=[{"value": DIP8_OFF, "label": "Off (default)"}, {"value": DIP8_ON, "label": "On"}],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+        elif not vp729:
             fields[vol.Required(CONF_MACHINE, default=int(cur.get(CONF_MACHINE, DEFAULT_MACHINE)))] = _number(1, machine_max_for(model))
         note = (
             "Its Ethernet port is 5000 unless changed on the unit's network module, and \"Password Required\" "
             "on that port must be set to No."
             if vp729
+            else "DIP switch 8 on the rear of the device selects its address. Choose Off or On to match the switch's position."
+            if sp11d
             else "The machine number is 1 unless units are daisy-chained."
         )
         return self.async_show_form(
@@ -413,12 +456,27 @@ class KramerOptionsFlow(OptionsFlow):
         """Show the device name and notes, then choose between names and presets."""
         if is_vp729(self.config_entry.data):
             return self.async_abort(reason="no_options")
+        if is_sp11d(self.config_entry.data):
+            return await self.async_step_init_notes()
         notes = resolve_notes(self.config_entry.data)
         has_presets = resolve_preset_slots(self.config_entry.data) > 0
         return self.async_show_menu(
             step_id="init",
             menu_options=["names", "presets"] if has_presets else ["names"],
             description_placeholders={"notes": notes or " ", "name": self.config_entry.title},
+        )
+
+    async def async_step_init_notes(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Show an SP-11D's notes (it has no names or presets to configure here)."""
+        if user_input is not None:
+            return self.async_create_entry(data=dict(self.config_entry.options))
+        return self.async_show_form(
+            step_id="init_notes",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "notes": resolve_notes(self.config_entry.data),
+                "name": self.config_entry.title,
+            },
         )
 
     async def async_step_names(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

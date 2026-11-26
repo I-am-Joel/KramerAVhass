@@ -33,6 +33,17 @@ def name_in_use(hass: HomeAssistant, name: str, exclude_entry_id: str | None = N
     )
 
 
+def unique_default_name(hass: HomeAssistant, base: str) -> str:
+    """Return the name pre-filled for a new device: the model name, with a number added if that is in use."""
+    if not base:
+        return ""
+    candidate, number = base, 2
+    while name_in_use(hass, candidate):
+        candidate = f"{base} {number}"
+        number += 1
+    return candidate
+
+
 def entries_at_address(
     hass: HomeAssistant, host: str, port: int, exclude_entry_id: str | None = None
 ) -> list[ConfigEntry]:

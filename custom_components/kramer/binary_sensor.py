@@ -13,6 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .entity import (
     KramerConfigEntry,
     KramerEntity,
+    Sp11dData,
     Vp729Data,
     audio_input_to_name,
     base_output_name,
@@ -28,7 +29,7 @@ async def async_setup_entry(
     """Set up the connection sensor, and an In step sensor per output on models with separate audio."""
     data = entry.runtime_data
     entities: list[KramerEntity] = [KramerConnectionSensor(entry)]
-    if not isinstance(data, Vp729Data) and data.has_audio:
+    if not isinstance(data, Vp729Data | Sp11dData) and data.has_audio:
         entities += [KramerInStepSensor(entry, number, name) for number, name in enumerate(data.output_names, start=1)]
     async_add_entities(entities)
 

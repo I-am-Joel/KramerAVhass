@@ -483,7 +483,7 @@ async def test_config_flow_known_and_other(hass: HomeAssistant) -> None:
     port2 = await sim2.start()
     result = await _start_flow(hass, "other")
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {**base, "port": port2, "machine": 2}
+        result["flow_id"], {**base, "name": "Other unit", "port": port2, "machine": 2}
     )
     assert result["step_id"] == "other"
     assert "preset_slots" in result["data_schema"].schema
@@ -973,7 +973,8 @@ async def test_vs808yc_model(hass: HomeAssistant) -> None:
         o["label"] for o in result["data_schema"].schema["model"].config["options"]
     ]
     assert "VS-808YC (Protocol 2000)" in labels
-    assert labels[0] == "VP-729 (ASCII)" and labels[-1].startswith("Other")
+    assert labels[:3] == ["SIS-4x4 (2-byte protocol)", "SP-11D (Video processor protocol)", "VP-729 (ASCII)"]
+    assert labels[-1].startswith("Other")
     await hass.config_entries.async_unload(entry.entry_id)
     await sim.stop()
 

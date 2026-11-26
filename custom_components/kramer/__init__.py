@@ -18,6 +18,7 @@ from .const import (
     CONF_AUDIO_INPUT_NAMES,
     CONF_AUDIO_OUTPUT_NAMES,
     CONF_CUSTOM_REFRESH,
+    CONF_DIP8,
     CONF_HOST,
     CONF_INPUT_NAMES,
     CONF_INPUTS,
@@ -36,10 +37,12 @@ from .const import (
     MAX_REFRESH,
     MIN_REFRESH,
 )
-from .entity import KramerConfigEntry, KramerData, Vp729Data
+from .entity import KramerConfigEntry, KramerData, Sp11dData, Vp729Data
 from .models import (
     MODELS,
     PROTOCOL_2BYTE,
+    dip8_address,
+    is_sp11d,
     is_vp729,
     resolve_audio_levels,
     resolve_model_key,
@@ -53,6 +56,7 @@ from .models import (
 from .presets import parse_descriptions
 from .protocol import KramerClient
 from .services import async_register_services
+from .sp11d_protocol import Sp11dClient
 from .twobyte import KramerTwoByteClient, TwoByteSpec
 from .vp729_protocol import Vp729Client
 
@@ -77,6 +81,8 @@ VP729_PLATFORMS = [
     Platform.SENSOR,
     Platform.SWITCH,
 ]
+
+SP11D_PLATFORMS = VP729_PLATFORMS
 
 REFRESH_KEYS = (CONF_CUSTOM_REFRESH, CONF_REFRESH_SECONDS)
 
@@ -149,6 +155,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         )
     if is_vp729(data):
         return await _setup_vp729(hass, entry)
+    if is_sp11d(data):
+        return await _setup_sp11d(hass, entry)
     try:
         inputs = int(data[CONF_INPUTS])
         outputs = int(data[CONF_OUTPUTS])
@@ -170,7 +178,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
             int(data.get(CONF_PORT, DEFAULT_PORT)),
             int(data.get(CONF_MACHINE, DEFAULT_MACHINE)),
             TwoByteSpec(
-                model.reply_id, inputs, outputs, model.has_all, model.supports_off, bool(model.audio_levels)
+                model.reply_id,
+                inputs,
+                outputs,
+                model.has_all,
+                model.supports_off,
+                bool(model.audio_levels),
+                model.off_command_base,
+                model.off_all_command,
+                model.off_status_base,
             ),
             audio_levels=levels,
             refresh_interval=effective_refresh(custom_refresh, refresh_seconds),
@@ -266,6 +282,33 @@ async def _setup_vp729(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
     return True
 
 
+async def _setup_sp11d(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
+    """Set up an SP-11D digital video processor."""
+    data = entry.data
+    custom_refresh, refresh_seconds = refresh_settings(entry.options)
+    client = Sp11dClient(
+        data[CONF_HOST],
+        int(data.get(CONF_PORT, DEFAULT_PORT)),
+        dip8_address(data.get(CONF_DIP8)),
+        refresh_interval=effective_refresh(custom_refresh, refresh_seconds),
+    )
+    entry.runtime_data = Sp11dData(
+        client=client,
+        model_name=resolve_model_name(data),
+        custom_refresh=custom_refresh,
+        refresh_seconds=refresh_seconds,
+        applied_options=_without_refresh(entry.options),
+    )
+    await client.async_start()
+    # Entities start unavailable and fill in when the unit answers, so a unit that is off never blocks start-up.
+    if not await client.async_wait_ready(10):
+        _LOGGER.warning("SP-11D at %s is not answering yet; will keep trying", data[CONF_HOST])
+
+    await hass.config_entries.async_forward_entry_setups(entry, SP11D_PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_reload))
+    return True
+
+
 def _without_refresh(options: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in options.items() if k not in REFRESH_KEYS}
 
@@ -279,7 +322,7 @@ async def _reload(hass: HomeAssistant, entry: KramerConfigEntry) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
     """Unload an entry."""
-    platforms = VP729_PLATFORMS if is_vp729(entry.data) else PLATFORMS
+    platforms = VP729_PLATFORMS if is_vp729(entry.data) or is_sp11d(entry.data) else PLATFORMS
     unloaded = await hass.config_entries.async_unload_platforms(entry, platforms)
     if unloaded:
         await entry.runtime_data.client.async_stop()

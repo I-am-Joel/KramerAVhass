@@ -10,6 +10,7 @@ CONF_MODEL_NAME = "model_name"
 CONF_INPUTS = "inputs"
 CONF_OUTPUTS = "outputs"
 CONF_MODES = "supports_modes"
+CONF_DIP8 = "dip8"  # SP-11D: position of DIP switch 8 ("off" or "on"), which sets its machine address
 
 CONF_PRESET_SLOTS = "preset_slots"
 CONF_PRESET_DESCRIPTIONS = "preset_descriptions"

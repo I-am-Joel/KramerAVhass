@@ -14,12 +14,14 @@ from .const import SOURCE_MIXED
 from .entity import (
     KramerConfigEntry,
     KramerEntity,
+    Sp11dData,
     Vp729Data,
     audio_input_to_name,
     base_output_name,
     input_to_name,
 )
 from .protocol import MODE_AFV, MODE_BREAKAWAY
+from .sp11d_entity import build as sp11d_build
 from .vp729_defs import KIND_SENSOR
 from .vp729_entity import Vp729StatusSensor
 from .vp729_entity import build as vp729_build
@@ -38,6 +40,11 @@ async def async_setup_entry(
                 KramerLastErrorSensor(entry),
                 *vp729_build(entry, KIND_SENSOR),
             ]
+        )
+        return
+    if isinstance(data, Sp11dData):
+        async_add_entities(
+            [KramerLastReplySensor(entry), KramerLastErrorSensor(entry), *sp11d_build(entry, KIND_SENSOR)]
         )
         return
     client = data.client

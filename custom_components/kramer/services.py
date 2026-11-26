@@ -82,6 +82,8 @@ def _target_entries(hass: HomeAssistant, call: ServiceCall) -> list[KramerConfig
                 continue
             if entry.state is not ConfigEntryState.LOADED:
                 raise ServiceValidationError(f"{entry.title} is not loaded")
+            if not isinstance(entry.runtime_data, KramerData):
+                raise ServiceValidationError(f"{entry.title} is not a switcher, so it has no routes to set")
             entries.append(entry)
     if not entries:
         raise ServiceValidationError("Choose a Kramer switcher as the target of this action")

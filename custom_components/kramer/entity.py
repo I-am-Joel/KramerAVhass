@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
@@ -19,8 +19,9 @@ from .const import (
     SOURCE_MIXED,
     SOURCE_OFF,
 )
-from .models import PROTOCOL_2000, PROTOCOL_ASCII, model_label
+from .models import PROTOCOL_2000, PROTOCOL_ASCII, PROTOCOL_SP11D, model_label
 from .protocol import KramerClient, KramerError
+from .sp11d_protocol import Sp11dClient
 from .vp729_protocol import Vp729Client
 
 
@@ -73,7 +74,23 @@ class Vp729Data:
     protocol: str = PROTOCOL_ASCII
 
 
-type KramerConfigEntry = ConfigEntry[KramerData | Vp729Data]
+@dataclass
+class Sp11dData:
+    """Everything the platforms need for an SP-11D, stored on the config entry.
+
+    Like Vp729Data, it carries the refresh settings and a client with the same availability,
+    listener and last-error members, so the shared entities work for every kind of device.
+    """
+
+    client: Sp11dClient
+    model_name: str
+    custom_refresh: bool = False
+    refresh_seconds: int = 60
+    applied_options: dict = field(default_factory=dict)
+    protocol: str = PROTOCOL_SP11D
+
+
+type KramerConfigEntry = ConfigEntry[KramerData | Vp729Data | Sp11dData]
 
 
 def source_options(data: KramerData) -> list[str]:
@@ -119,14 +136,12 @@ def link_icon(in_step: bool | None) -> str | None:
     return LINK_ICON if in_step else UNLINK_ICON
 
 
-def source_options_with_mixed(data: KramerData) -> list[str]:
-    """Return sources plus Mixed, which is shown as a status and cannot be chosen."""
-    return [*source_options(data), SOURCE_MIXED]
-
-
-def reject_mixed() -> None:
-    """Raise the error shown when someone chooses Mixed."""
-    raise ServiceValidationError("Mixed is only a status. Choose an input or Off instead.")
+def source_options_for_status(data: KramerData) -> list[str]:
+    """Return the sources, plus Mixed only while the outputs differ (it is a status and cannot be chosen)."""
+    options = source_options(data)
+    if input_to_name(data, data.client.common_all) is None:
+        options.append(SOURCE_MIXED)
+    return options
 
 
 def base_output_name(name: str) -> str:

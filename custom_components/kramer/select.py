@@ -11,6 +11,7 @@ from .const import SOURCE_MIXED
 from .entity import (
     KramerConfigEntry,
     KramerEntity,
+    Sp11dData,
     Vp729Data,
     audio_input_to_name,
     audio_name_to_input,
@@ -19,11 +20,11 @@ from .entity import (
     input_to_name,
     link_icon,
     name_to_input,
-    reject_mixed,
     source_options,
-    source_options_with_mixed,
+    source_options_for_status,
 )
 from .protocol import MODE_AFV, MODE_BREAKAWAY
+from .sp11d_entity import build as sp11d_build
 from .vp729_defs import KIND_SELECT
 from .vp729_entity import build as vp729_build
 
@@ -40,6 +41,9 @@ async def async_setup_entry(
     data = entry.runtime_data
     if isinstance(data, Vp729Data):
         async_add_entities(vp729_build(entry, KIND_SELECT))
+        return
+    if isinstance(data, Sp11dData):
+        async_add_entities(sp11d_build(entry, KIND_SELECT))
         return
     entities: list[SelectEntity] = []
     if len(data.output_names) > 1:
@@ -69,7 +73,11 @@ class KramerAllOutputs(KramerEntity, SelectEntity):
     def __init__(self, entry: KramerConfigEntry) -> None:
         """Initialise."""
         super().__init__(entry, "all_outputs")
-        self._attr_options = source_options_with_mixed(self._data)
+
+    @property
+    def options(self) -> list[str]:
+        """Return the sources, with Mixed listed only while the outputs differ."""
+        return source_options_for_status(self._data)
 
     @property
     def current_option(self) -> str:
@@ -89,7 +97,7 @@ class KramerAllOutputs(KramerEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Route to all outputs."""
         if option == SOURCE_MIXED:
-            reject_mixed()
+            return  # Mixed is only a status: choosing it changes nothing
         await self._call(self._client.async_set_all_layers(0, name_to_input(self._data, option)))
 
 

@@ -8,7 +8,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import MAX_REFRESH, MIN_REFRESH
-from .entity import KramerConfigEntry, KramerEntity, Vp729Data, save_refresh
+from .entity import KramerConfigEntry, KramerEntity, Sp11dData, Vp729Data, save_refresh
+from .sp11d_entity import build as sp11d_build
 from .vp729_defs import KIND_NUMBER
 from .vp729_entity import build as vp729_build
 
@@ -20,6 +21,8 @@ async def async_setup_entry(
     entities: list[KramerEntity] = [KramerRefreshInterval(entry)]
     if isinstance(entry.runtime_data, Vp729Data):
         entities += vp729_build(entry, KIND_NUMBER)
+    elif isinstance(entry.runtime_data, Sp11dData):
+        entities += sp11d_build(entry, KIND_NUMBER)
     async_add_entities(entities)
 
 

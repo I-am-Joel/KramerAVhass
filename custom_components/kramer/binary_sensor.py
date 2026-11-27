@@ -14,6 +14,7 @@ from .entity import (
     KramerConfigEntry,
     KramerEntity,
     Sp11dData,
+    Vp436Data,
     Vp729Data,
     audio_input_to_name,
     base_output_name,
@@ -29,8 +30,17 @@ async def async_setup_entry(
     """Set up the connection sensor, and an In step sensor per output on models with separate audio."""
     data = entry.runtime_data
     entities: list[KramerEntity] = [KramerConnectionSensor(entry)]
-    if not isinstance(data, Vp729Data | Sp11dData) and data.has_audio:
-        entities += [KramerInStepSensor(entry, number, name) for number, name in enumerate(data.output_names, start=1)]
+    if isinstance(data, Vp436Data):
+        entities.append(Vp436SignalSensor(entry))
+    elif isinstance(data, Sp11dData):
+        entities.append(KramerFrontPanelBusySensor(entry))
+    elif not isinstance(data, Vp729Data):
+        if data.has_audio:
+            entities += [
+                KramerInStepSensor(entry, number, name) for number, name in enumerate(data.output_names, start=1)
+            ]
+        if data.client.busy_supported:
+            entities.append(KramerFrontPanelBusySensor(entry))
     async_add_entities(entities)
 
 
@@ -54,6 +64,48 @@ class KramerConnectionSensor(KramerEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         """Return whether the unit is answering."""
         return self._client.available
+
+
+class KramerFrontPanelBusySensor(KramerEntity, BinarySensorEntity):
+    """On while the device is waiting for an entry on its front panel (a button is flashing) and refuses commands."""
+
+    _attr_name = "Front panel busy (indicated by a flashing button)"
+    _attr_icon = "mdi:gesture-tap-button"
+
+    def __init__(self, entry: KramerConfigEntry) -> None:
+        """Initialise."""
+        super().__init__(entry, "front_panel_busy")
+
+    @property
+    def available(self) -> bool:
+        """Readable while the device answers, and while it is refusing commands because it is busy."""
+        return self._client.available or self._client.busy
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether the device is waiting for a front-panel entry."""
+        return self._client.busy
+
+
+class Vp436SignalSensor(KramerEntity, BinarySensorEntity):
+    """On while the device sees a signal on the input in use (read from the device; it does not announce changes)."""
+
+    _attr_name = "Signal detected"
+    _attr_icon = "mdi:video-input-hdmi"
+
+    def __init__(self, entry: KramerConfigEntry) -> None:
+        """Initialise."""
+        super().__init__(entry, "signal_detected")
+
+    @property
+    def available(self) -> bool:
+        """Return whether the device has reported the signal state."""
+        return self._client.signal_detected is not None and self._client.available
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether a signal is present."""
+        return self._client.signal_detected
 
 
 class KramerInStepSensor(KramerEntity, BinarySensorEntity):

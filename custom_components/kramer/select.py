@@ -12,6 +12,7 @@ from .entity import (
     KramerConfigEntry,
     KramerEntity,
     Sp11dData,
+    Vp436Data,
     Vp729Data,
     audio_input_to_name,
     audio_name_to_input,
@@ -25,6 +26,7 @@ from .entity import (
 )
 from .protocol import MODE_AFV, MODE_BREAKAWAY
 from .sp11d_entity import build as sp11d_build
+from .vp436_entity import build as vp436_build
 from .vp729_defs import KIND_SELECT
 from .vp729_entity import build as vp729_build
 
@@ -44,6 +46,9 @@ async def async_setup_entry(
         return
     if isinstance(data, Sp11dData):
         async_add_entities(sp11d_build(entry, KIND_SELECT))
+        return
+    if isinstance(data, Vp436Data):
+        async_add_entities(vp436_build(entry, KIND_SELECT))
         return
     entities: list[SelectEntity] = []
     if len(data.output_names) > 1:

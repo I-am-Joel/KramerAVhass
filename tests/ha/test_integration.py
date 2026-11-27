@@ -973,7 +973,7 @@ async def test_vs808yc_model(hass: HomeAssistant) -> None:
         o["label"] for o in result["data_schema"].schema["model"].config["options"]
     ]
     assert "VS-808YC (Protocol 2000)" in labels
-    assert labels[:3] == ["SIS-4x4 (2-byte protocol)", "SP-11D (Video processor protocol)", "VP-729 (ASCII)"]
+    assert labels[:3] == ["SIS-4x4 (2-byte protocol)", "SP-11D (Video processor protocol)", "VP-436/437XL (ASCII)"]
     assert labels[-1].startswith("Other")
     await hass.config_entries.async_unload(entry.entry_id)
     await sim.stop()

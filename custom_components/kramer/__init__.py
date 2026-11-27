@@ -19,6 +19,7 @@ from .const import (
     CONF_AUDIO_OUTPUT_NAMES,
     CONF_CUSTOM_REFRESH,
     CONF_DIP8,
+    CONF_FORCE_LOCK,
     CONF_HOST,
     CONF_INPUT_NAMES,
     CONF_INPUTS,
@@ -37,14 +38,16 @@ from .const import (
     MAX_REFRESH,
     MIN_REFRESH,
 )
-from .entity import KramerConfigEntry, KramerData, Sp11dData, Vp729Data
+from .entity import KramerConfigEntry, KramerData, Sp11dData, Vp436Data, Vp729Data
 from .models import (
     MODELS,
     PROTOCOL_2BYTE,
     dip8_address,
     is_sp11d,
+    is_vp436,
     is_vp729,
     resolve_audio_levels,
+    resolve_flash_busy,
     resolve_model_key,
     resolve_model_name,
     resolve_preset_slots,
@@ -58,6 +61,7 @@ from .protocol import KramerClient
 from .services import async_register_services
 from .sp11d_protocol import Sp11dClient
 from .twobyte import KramerTwoByteClient, TwoByteSpec
+from .vp436_protocol import Vp436Client
 from .vp729_protocol import Vp729Client
 
 _LOGGER = logging.getLogger(__name__)
@@ -83,6 +87,7 @@ VP729_PLATFORMS = [
 ]
 
 SP11D_PLATFORMS = VP729_PLATFORMS
+VP436_PLATFORMS = VP729_PLATFORMS
 
 REFRESH_KEYS = (CONF_CUSTOM_REFRESH, CONF_REFRESH_SECONDS)
 
@@ -157,6 +162,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
         return await _setup_vp729(hass, entry)
     if is_sp11d(data):
         return await _setup_sp11d(hass, entry)
+    if is_vp436(data):
+        return await _setup_vp436(hass, entry)
     try:
         inputs = int(data[CONF_INPUTS])
         outputs = int(data[CONF_OUTPUTS])
@@ -204,6 +211,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bo
             supports_lock=resolve_supports_lock(data),
             audio_levels=levels,
             retry_error=resolve_retry_error(data),
+            flash_busy=resolve_flash_busy(data),
         )
     output_names = effective_names(
         entry.options.get(CONF_OUTPUT_NAMES),
@@ -291,6 +299,7 @@ async def _setup_sp11d(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
         int(data.get(CONF_PORT, DEFAULT_PORT)),
         dip8_address(data.get(CONF_DIP8)),
         refresh_interval=effective_refresh(custom_refresh, refresh_seconds),
+        force_lock=bool(data.get(CONF_FORCE_LOCK, False)),
     )
     entry.runtime_data = Sp11dData(
         client=client,
@@ -309,6 +318,33 @@ async def _setup_sp11d(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
     return True
 
 
+async def _setup_vp436(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
+    """Set up a VP-436 / VP-437XL presentation switcher/scaler."""
+    data = entry.data
+    custom_refresh, refresh_seconds = refresh_settings(entry.options)
+    client = Vp436Client(
+        data[CONF_HOST],
+        int(data.get(CONF_PORT, DEFAULT_PORT)),
+        refresh_interval=effective_refresh(custom_refresh, refresh_seconds),
+    )
+    entry.runtime_data = Vp436Data(
+        client=client,
+        model_name=resolve_model_name(data),
+        custom_refresh=custom_refresh,
+        refresh_seconds=refresh_seconds,
+        applied_options=_without_refresh(entry.options),
+    )
+    await client.async_start()
+    # Entities start unavailable and fill in when the device answers, so a device that is off never blocks start-up.
+    # The first read takes a few seconds (every setting is read one at a time).
+    if not await client.async_wait_ready(20):
+        _LOGGER.warning("VP-436/437XL at %s is not answering yet; will keep trying", data[CONF_HOST])
+
+    await hass.config_entries.async_forward_entry_setups(entry, VP436_PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_reload))
+    return True
+
+
 def _without_refresh(options: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in options.items() if k not in REFRESH_KEYS}
 
@@ -322,7 +358,8 @@ async def _reload(hass: HomeAssistant, entry: KramerConfigEntry) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: KramerConfigEntry) -> bool:
     """Unload an entry."""
-    platforms = VP729_PLATFORMS if is_vp729(entry.data) or is_sp11d(entry.data) else PLATFORMS
+    other = is_vp729(entry.data) or is_sp11d(entry.data) or is_vp436(entry.data)
+    platforms = VP729_PLATFORMS if other else PLATFORMS
     unloaded = await hass.config_entries.async_unload_platforms(entry, platforms)
     if unloaded:
         await entry.runtime_data.client.async_stop()

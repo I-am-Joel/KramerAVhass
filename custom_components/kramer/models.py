@@ -17,16 +17,43 @@ PROTOCOL_2000 = "Protocol 2000"
 PROTOCOL_ASCII = "ASCII"
 PROTOCOL_2BYTE = "2-byte protocol"
 PROTOCOL_SP11D = "Video processor protocol"  # the SP-11D's; rename if another processor shares it
+VP436_KEY = "vp-436"  # the VP-436 / VP-437XL presentation switcher/scaler (ASCII over serial; not a matrix)
+VP436_NAME = "VP-436/437XL"
+VP436_NOTES = (
+    "**Model-specific limits:**\n\n"
+    "- Serial settings: 9600 baud, 8 data bits, no parity, 1 stop bit, no flow control. "
+    "A null-modem adapter is required.\n"
+    "- Tested as working on a VP-436 (firmware V6.24) connected by serial through a bridge. "
+    "The VP-437XL has the same software and adds an Ethernet port, which has not been tested.\n"
+    "- Input and output HDCP controls appear when the firmware supports them (V6.27 and V6.29).\n"
+    "- In standby the device keeps its levels and options, but its picture and sound are off. "
+    "Input, freeze and Panel lock are available only when the device is on.\n"
+    "- Changing the output resolution takes about 2 seconds, and reconnecting an HDMI source can leave the "
+    "device silent for about 5 seconds.\n"
+    "- Factory reset restores every setting and takes about 8 seconds.\n"
+    "- Auto sync off is untested."
+)
 VP729_KEY = "vp-729"  # the VP-729 presentation scaler/switcher (not a matrix, so not in MODELS)
 VP729_NAME = "VP-729"
 SP11D_KEY = "sp-11d"  # the SP-11D digital video processor (not a matrix, so not in MODELS)
 SP11D_NAME = "SP-11D"
+FRONT_PANEL_BUSY_NOTE = (
+    "While a front-panel button is flashing and waiting for an input, the device refuses all read and write "
+    "commands from Home Assistant. Home Assistant cannot cancel this: you need to press the flashing button "
+    'again on the device. The "Front panel busy" sensor - indicated by a flashing button - shows when this '
+    "state is active."
+)
 SP11D_NOTES = (
     "**Model-specific limits:**\n\n"
     "- Uses the video processor protocol. Serial settings: 9600 baud, 8 data bits, no parity, 1 stop bit.\n"
     "- Tested as working with DIP switches 1, 2 & 3 on and 4 to 8 off. Set the DIP switch 8 position here to match the device.\n"
     "- Changing the output standard restarts the device. This takes about 3 seconds.\n"
-    "- Reset all defaults clears every parameter and all stored presets."
+    "- Reset all defaults clears every parameter and all stored presets.\n"
+    f"- {FRONT_PANEL_BUSY_NOTE}\n"
+    '- Panel lock (forced): when on, the integration locks the device\'s front panel each time it connects and '
+    "locks it again at every refresh if it has been released. This stops a front-panel button being left flashing "
+    "and blocking control from Home Assistant. Buttons on the device do not work while it is locked. "
+    'Turn it off before using the "Panel lock" switch.'
 )
 DIP8_OFF = "off"
 DIP8_ON = "on"
@@ -53,6 +80,7 @@ class KramerModel:
     machine_max: int = 15  # the highest machine number the model can be given
     audio_levels: tuple[int, ...] = ()  # selectable output levels in dB (empty = no level setting)
     retry_error: bool = False  # answers "error" while someone is using the front panel, so retry
+    flash_busy: bool = False  # answers error 3 to everything while a front-panel button is flashing
     # The next two apply to the 2-byte protocol only.
     reply_id: int = 0  # bits N6 to N3 of the first byte of the unit's replies
     has_all: bool = False  # has one command that sends an input to every output
@@ -89,6 +117,28 @@ MODELS: dict[str, KramerModel] = {
             "**Model-specific limits:**\n\n"
             "- Serial settings: 9600 baud, 8 data bits, no parity, 1 stop bit.\n"
             "- Tested as working with all DIP switches off."
+        ),
+    ),
+    "vs-808xl": KramerModel(
+        "vs-808xl",
+        "VS-808XL",
+        8,
+        8,
+        True,
+        supports_lock=False,
+        preset_slots=8,
+        machine_max=8,
+        flash_busy=True,
+        notes=(
+            "**Model-specific limits:**\n\n"
+            "- 8 inputs, 8 outputs\n"
+            "- Independent audio and video switching is supported.\n"
+            "- 8 stored presets\n"
+            "- Highest machine address 8\n"
+            "- Serial settings 9600, 8 data bits, no parity, 1 stop bit, no flow control. Tested as working with all "
+            "DIP switches on (DIPs 1, 2 and 3 on = machine 1). DIP 5 on makes the unit reply to commands and DIP 8 "
+            "on selects RS-232.\n"
+            f"- {FRONT_PANEL_BUSY_NOTE}"
         ),
     ),
     "vs-812": KramerModel(
@@ -193,6 +243,11 @@ def is_vp729(data: Mapping[str, Any]) -> bool:
     return data.get("model") == VP729_KEY
 
 
+def is_vp436(data: Mapping[str, Any]) -> bool:
+    """Return whether a config entry's data describes a VP-436 / VP-437XL."""
+    return data.get("model") == VP436_KEY
+
+
 def is_sp11d(data: Mapping[str, Any]) -> bool:
     """Return whether a config entry's data describes an SP-11D video processor."""
     return data.get("model") == SP11D_KEY
@@ -202,6 +257,8 @@ def resolve_model_name(data: Mapping[str, Any]) -> str:
     """Return the model name to show for a config entry's data."""
     if is_sp11d(data):
         return SP11D_NAME
+    if is_vp436(data):
+        return VP436_NAME
     key = resolve_model_key(data.get("model"))
     if key:
         return MODELS[key].name
@@ -249,10 +306,18 @@ def resolve_audio_levels(data: Mapping[str, Any]) -> tuple[int, ...]:
     return MODELS[key].audio_levels if key else ()
 
 
+def resolve_flash_busy(data: Mapping[str, Any]) -> bool:
+    """Return whether the model answers error 3 to everything while a front-panel button is flashing."""
+    key = resolve_model_key(data.get("model"))
+    return MODELS[key].flash_busy if key else False
+
+
 def resolve_notes(data: Mapping[str, Any]) -> str:
     """Return the notes shipped with a model (empty for unknown models)."""
     if is_sp11d(data):
         return SP11D_NOTES
+    if is_vp436(data):
+        return VP436_NOTES
     key = resolve_model_key(data.get("model"))
     return MODELS[key].notes if key else ""
 
@@ -270,6 +335,7 @@ def model_choices() -> list[tuple[str, str]]:
     entries = [(m.name, m.protocol, m.key, model_label(m.name, m.protocol)) for m in MODELS.values()]
     entries.append((VP729_NAME, PROTOCOL_ASCII, VP729_KEY, model_label(VP729_NAME, PROTOCOL_ASCII)))
     entries.append((SP11D_NAME, PROTOCOL_SP11D, SP11D_KEY, model_label(SP11D_NAME, PROTOCOL_SP11D)))
+    entries.append((VP436_NAME, PROTOCOL_ASCII, VP436_KEY, model_label(VP436_NAME, PROTOCOL_ASCII)))
     entries.sort(key=lambda e: (e[0].casefold(), e[1] == PROTOCOL_2BYTE))
     choices = [(key, label) for _, _, key, label in entries]
     choices.append((OTHER, OTHER_LABEL))
@@ -288,6 +354,8 @@ def default_name_for(model: str | None) -> str:
         return VP729_NAME
     if model == SP11D_KEY:
         return SP11D_NAME
+    if model == VP436_KEY:
+        return VP436_NAME
     key = resolve_model_key(model)
     return MODELS[key].name if key else ""
 

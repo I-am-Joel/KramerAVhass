@@ -62,6 +62,13 @@ _ERROR_CODES = {
 }
 _NOTIFY_CODES = (4, 5)
 
+FRONT_PANEL_BUSY_MESSAGE = (
+    "The device is waiting for an entry on its front panel (a button is flashing) so it cannot accept commands now. "
+    "Press the flashing button again to cancel the entry, then try again."
+)
+BUSY_CODE = 3  # the error code a model answers with while a front-panel entry is waiting (see KramerClient)
+BUSY_INTERVAL = 3.0  # seconds between attempts while the device is waiting for a front-panel entry
+
 _PACKET_SIZE = 4
 
 # How often to re-check which preset slots are filled (seconds).
@@ -82,6 +89,10 @@ class KramerTimeoutError(KramerError):
 
 class KramerCommandError(KramerError):
     """The unit answered with an error packet."""
+
+
+class KramerBusyError(KramerCommandError):
+    """The device is waiting for an entry on its front panel and refuses commands."""
 
 
 @dataclass(frozen=True)
@@ -246,8 +257,14 @@ class KramerClient:
         supports_lock: bool = True,
         audio_levels: tuple[int, ...] = (),
         retry_error: bool = False,
+        flash_busy: bool = False,
     ) -> None:
-        """Initialise the client (nothing connects until async_start)."""
+        """Initialise the client (nothing connects until async_start).
+
+        With `flash_busy` the model answers every command with error 3 while a front-panel
+        button is flashing, so that answer is treated as "busy" and not as a fault.
+        """
+        self._flash_busy = flash_busy
         self._audio_levels = tuple(audio_levels)
         self._busy_wait = 1.0
         self._retry_error = retry_error
@@ -272,6 +289,8 @@ class KramerClient:
         self._ready = asyncio.Event()
 
         self.available = False
+        self.busy = False
+        self.busy_supported = flash_busy
         self.routes: dict[int, int] = {}
         self.audio_routes: dict[int, int] = {}
         self.mode: int | None = None
@@ -564,14 +583,29 @@ class KramerClient:
                         # Answered while someone is using the front panel: wait and ask again.
                         await asyncio.sleep(self._busy_wait)
                         continue
+                    if code == BUSY_CODE and self._flash_busy:
+                        self._set_busy(True)
+                        if not quiet:
+                            self._record_error(FRONT_PANEL_BUSY_MESSAGE)
+                        raise KramerBusyError(FRONT_PANEL_BUSY_MESSAGE)
                     message = f"Unit reported: {_ERROR_CODES.get(code, code)}"
                     if not quiet:
                         self._record_error(message)
                     raise KramerCommandError(message)
+                self._set_busy(False)
                 return reply
         if not quiet:
             self._record_error("No reply from the unit")
         raise KramerTimeoutError("No reply from the unit")
+
+    def _set_busy(self, busy: bool) -> None:
+        """Note whether the device is waiting for a front-panel entry, telling listeners if that changed."""
+        if self.busy != busy:
+            self.busy = busy
+            if busy:
+                # Wake the refresh loop so it starts retrying at the short busy interval.
+                self._refresh_event.set()
+            self._notify()
 
     def _record_error(self, message: str) -> None:
         """Remember the latest problem, for the diagnostic sensors."""
@@ -613,6 +647,8 @@ class KramerClient:
                 except KramerTimeoutError:
                     _LOGGER.debug("Unit is not answering; will retry")
                     self._set_available(False)
+                except KramerBusyError:
+                    _LOGGER.debug("Unit is waiting for a front-panel entry; keeping the last values and trying again")
                 except KramerCommandError as err:
                     if self._retry_error and self.available:
                         _LOGGER.debug("Unit is busy or refused a status request: %s", err)
@@ -620,7 +656,10 @@ class KramerClient:
                         _LOGGER.warning("Unit rejected a status request: %s", err)
                         self._set_available(False)
 
-                interval = self._refresh_interval if self.available else self._retry_interval
+                if self.busy:
+                    interval = BUSY_INTERVAL
+                else:
+                    interval = self._refresh_interval if self.available else self._retry_interval
                 self._refresh_event.clear()
                 waiter = asyncio.create_task(self._refresh_event.wait())
                 try:

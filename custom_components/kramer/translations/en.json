@@ -34,7 +34,11 @@
           "ip_address": "IP address",
           "port": "Port",
           "machine": "Machine number (1 unless daisy-chained)",
-          "dip8": "DIP switch 8 position"
+          "dip8": "DIP switch 8 position",
+          "force_lock": "Panel lock (forced)"
+        },
+        "data_description": {
+          "force_lock": "Locks the device's front panel whenever the integration is connected, which stops a front-panel button being left flashing and blocking control. Buttons on the device will not work while it is locked. You can change this later with the \"Panel lock (forced)\" switch."
         }
       },
       "shared": {
@@ -54,7 +58,8 @@
       "name_in_use": "A Kramer device called \"{name}\" already exists. This integration requires that each device has a unique name, so please choose a different one.",
       "address_in_use": "\"{entry}\" is enabled and already uses {host}:{port}. Either use a different IP/port for this device, or disable \"{entry}\" first and then add this one.",
       "no_reply_sp11d": "Connected, but the device did not answer. Check the cable and that the model chosen and serial settings - including baud rate - match the device's configuration. Also check the DIP switches on the device are correctly set.",
-      "name_required": "Please enter a name for this device."
+      "name_required": "Please enter a name for this device.",
+      "no_reply_vp436": "Connected, but the device did not answer. Check the cable and that the model chosen and serial settings - including baud rate - match the device's configuration."
     },
     "abort": {
       "already_configured": "This switcher is already set up.",

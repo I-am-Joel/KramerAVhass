@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
 
+from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.event import async_call_later
 
 from .const import (
     CONF_CUSTOM_REFRESH,
@@ -22,7 +25,18 @@ from .const import (
 from .models import PROTOCOL_2000, PROTOCOL_ASCII, PROTOCOL_SP11D, model_label
 from .protocol import KramerClient, KramerError
 from .sp11d_protocol import Sp11dClient
+from .vp436_protocol import Vp436Client
 from .vp729_protocol import Vp729Client
+
+RESET_CONFIRM_SECONDS = 30
+
+
+def _now() -> float:
+    """Return a clock reading in seconds that only moves forward."""
+    return time.monotonic()
+
+
+CONFIRM_SUFFIX = "Press the button again within {seconds} seconds to confirm."
 
 
 @dataclass
@@ -90,7 +104,19 @@ class Sp11dData:
     protocol: str = PROTOCOL_SP11D
 
 
-type KramerConfigEntry = ConfigEntry[KramerData | Vp729Data | Sp11dData]
+@dataclass
+class Vp436Data:
+    """Everything the platforms need for a VP-436/437XL, stored on the config entry (see Vp729Data)."""
+
+    client: Vp436Client
+    model_name: str
+    custom_refresh: bool = False
+    refresh_seconds: int = 60
+    applied_options: dict = field(default_factory=dict)
+    protocol: str = PROTOCOL_ASCII
+
+
+type KramerConfigEntry = ConfigEntry[KramerData | Vp729Data | Sp11dData | Vp436Data]
 
 
 def source_options(data: KramerData) -> list[str]:
@@ -216,3 +242,66 @@ def save_refresh(
         options={**entry.options, CONF_CUSTOM_REFRESH: data.custom_refresh, CONF_REFRESH_SECONDS: data.refresh_seconds},
     )
     data.client.set_refresh_interval(data.refresh_seconds if data.custom_refresh else DEFAULT_REFRESH)
+
+
+class DoublePressButton(KramerEntity, ButtonEntity):
+    """A button that needs two presses within 30 seconds.
+
+    The first press arms it and Home Assistant shows the warning as an error pop-up (so nothing
+    happens by accident); a second press within 30 seconds carries the action out.
+    """
+
+    _warning = ""
+
+    def __init__(self, entry: KramerConfigEntry, key: str) -> None:
+        """Initialise."""
+        super().__init__(entry, key)
+        self._armed_until = 0.0
+        self._expire: CALLBACK_TYPE | None = None
+
+    @property
+    def armed(self) -> bool:
+        """Return whether the first press was made and the 30 seconds have not run out."""
+        return _now() <= self._armed_until
+
+    @property
+    def extra_state_attributes(self) -> dict[str, bool]:
+        """Show whether the button is waiting for its second press."""
+        return {"armed": self.armed}
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Stop the timer."""
+        self._cancel_expiry()
+
+    def _cancel_expiry(self) -> None:
+        if self._expire is not None:
+            self._expire()
+            self._expire = None
+
+    @callback
+    def _expired(self, _now_time: object) -> None:
+        self._expire = None
+        self.async_write_ha_state()
+
+    def _arm(self, hass: HomeAssistant) -> None:
+        self._armed_until = _now() + RESET_CONFIRM_SECONDS
+        self._cancel_expiry()
+        self._expire = async_call_later(hass, RESET_CONFIRM_SECONDS, self._expired)
+        self.async_write_ha_state()
+
+    def _disarm(self) -> None:
+        self._armed_until = 0.0
+        self._cancel_expiry()
+        self.async_write_ha_state()
+
+    async def _act(self) -> None:
+        raise NotImplementedError
+
+    async def async_press(self) -> None:
+        """First press: arm and show the warning. A second press within 30 seconds: act."""
+        if self.armed:
+            self._disarm()
+            await self._act()
+            return
+        self._arm(self.hass)
+        raise HomeAssistantError(f"{self._warning} {CONFIRM_SUFFIX.format(seconds=RESET_CONFIRM_SECONDS)}")

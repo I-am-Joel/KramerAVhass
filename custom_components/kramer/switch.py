@@ -9,8 +9,9 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import KramerConfigEntry, KramerEntity, Sp11dData, Vp729Data, save_refresh
+from .entity import KramerConfigEntry, KramerEntity, Sp11dData, Vp436Data, Vp729Data, save_refresh
 from .sp11d_entity import build as sp11d_build
+from .vp436_entity import build as vp436_build
 from .vp729_defs import KIND_SWITCH
 from .vp729_entity import build as vp729_build
 
@@ -25,6 +26,8 @@ async def async_setup_entry(
         entities += vp729_build(entry, KIND_SWITCH)
     elif isinstance(data, Sp11dData):
         entities += sp11d_build(entry, KIND_SWITCH)
+    elif isinstance(data, Vp436Data):
+        entities += vp436_build(entry, KIND_SWITCH)
     elif data.supports_lock and data.client.lock_supported is not False:
         entities.append(KramerLockSwitch(entry))
     async_add_entities(entities)

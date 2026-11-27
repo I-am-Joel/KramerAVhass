@@ -14,7 +14,7 @@ from .const import (
     CONF_OUTPUT_NAMES,
     CONF_PRESET_DESCRIPTIONS,
 )
-from .entity import KramerConfigEntry, Sp11dData, Vp729Data
+from .entity import KramerConfigEntry, Sp11dData, Vp436Data, Vp729Data
 
 TO_REDACT = {
     CONF_HOST,
@@ -49,7 +49,34 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
             "model_code": client.model_code,
             "state": {
                 "available": client.available,
+                "busy": client.busy,
+                "force_lock": client.force_lock,
                 "values": {str(fn): value for fn, value in sorted(client.values.items())},
+                "last_reply": client.last_reply.isoformat() if client.last_reply else None,
+                "last_error": client.last_error,
+                "last_error_time": client.last_error_time.isoformat() if client.last_error_time else None,
+            },
+        }
+    if isinstance(data, Vp436Data):
+        return {
+            "entry": async_redact_data(
+                {
+                    "title": entry.title,
+                    "unique_id": entry.unique_id,
+                    "data": dict(entry.data),
+                    "options": dict(entry.options),
+                },
+                TO_REDACT,
+            ),
+            "model": data.model_name,
+            "protocol": data.protocol,
+            "firmware": client.firmware,
+            "state": {
+                "available": client.available,
+                "standby": client.standby,
+                "values": dict(sorted(client.values.items())),
+                "signal": client.signal,
+                "unsupported": sorted(client.unsupported),
                 "last_reply": client.last_reply.isoformat() if client.last_reply else None,
                 "last_error": client.last_error,
                 "last_error_time": client.last_error_time.isoformat() if client.last_error_time else None,
@@ -101,6 +128,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
         "identity": dict(client.identity),
         "state": {
             "available": client.available,
+            "busy": client.busy,
             "mode": client.mode,
             "locked": client.locked,
             "routes": dict(client.routes),

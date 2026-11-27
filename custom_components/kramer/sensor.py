@@ -15,6 +15,7 @@ from .entity import (
     KramerConfigEntry,
     KramerEntity,
     Sp11dData,
+    Vp436Data,
     Vp729Data,
     audio_input_to_name,
     base_output_name,
@@ -22,6 +23,7 @@ from .entity import (
 )
 from .protocol import MODE_AFV, MODE_BREAKAWAY
 from .sp11d_entity import build as sp11d_build
+from .vp436_entity import Vp436FirmwareSensor, Vp436StatusSensor
 from .vp729_defs import KIND_SENSOR
 from .vp729_entity import Vp729StatusSensor
 from .vp729_entity import build as vp729_build
@@ -39,6 +41,16 @@ async def async_setup_entry(
                 KramerLastReplySensor(entry),
                 KramerLastErrorSensor(entry),
                 *vp729_build(entry, KIND_SENSOR),
+            ]
+        )
+        return
+    if isinstance(data, Vp436Data):
+        async_add_entities(
+            [
+                Vp436StatusSensor(entry),
+                Vp436FirmwareSensor(entry),
+                KramerLastReplySensor(entry),
+                KramerLastErrorSensor(entry),
             ]
         )
         return

@@ -32,6 +32,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from .protocol import (
+    FRONT_PANEL_BUSY_MESSAGE,
     KramerCommandError,
     KramerConnectionError,
     KramerTimeoutError,
@@ -41,6 +42,7 @@ from .protocol import (
 from .sp11d_defs import (
     DETECTED_STANDARD_FN,
     OUTPUT_STANDARD_FN,
+    PANEL_LOCK_FN,
     PRESET_COUNT,
     PRESET_FN,
     READ_FNS,
@@ -54,6 +56,7 @@ ADDRESS_DIP8_OFF = 0x98
 ADDRESS_DIP8_ON = 0x99
 
 READ, WRITE, RECALL, STORE, RESET, IDENTIFY = 32, 33, 34, 35, 0, 61
+BUSY = 16  # the unit's answer to any command while a front-panel entry is waiting for a number
 IDENTIFY_NAME, IDENTIFY_VERSION = 1, 3
 
 RESTART_WAIT_SECONDS = 10.0  # the unit is silent for a few seconds after the output standard changes
@@ -62,6 +65,13 @@ DEFAULT_WAIT_SECONDS = 15.0  # the default command takes longer
 
 class Sp11dCommandError(KramerCommandError):
     """The unit did not accept a setting."""
+
+
+class Sp11dBusyError(Sp11dCommandError):
+    """The unit is waiting for a front-panel entry and refuses commands."""
+
+
+BUSY_MESSAGE = FRONT_PANEL_BUSY_MESSAGE
 
 
 def frame(first: int, param: int, value: int, address: int) -> bytes:
@@ -144,6 +154,8 @@ class Sp11dClient:
         retry_interval: float = 10.0,
         reconnect_delay: float = 5.0,
         request_timeout: float = 1.5,
+        busy_interval: float = 3.0,
+        force_lock: bool = False,
     ) -> None:
         """Initialise the client (nothing connects until async_start)."""
         self._host = host
@@ -153,6 +165,8 @@ class Sp11dClient:
         self._retry_interval = retry_interval
         self._reconnect_delay = reconnect_delay
         self._request_timeout = request_timeout
+        self._busy_interval = busy_interval
+        self._force_lock = force_lock
 
         self._task: asyncio.Task | None = None
         self._writer: asyncio.StreamWriter | None = None
@@ -166,6 +180,8 @@ class Sp11dClient:
         self._dirty: set[int] = set()
 
         self.available = False
+        self.busy = False
+        self.last_store: tuple[int, datetime] | None = None  # the preset last stored, and when
         self.values: dict[int, int] = {}
         self.firmware: str | None = None
         self.model_code: str | None = None
@@ -194,7 +210,27 @@ class Sp11dClient:
 
     def function_available(self, fn: int) -> bool:
         """Return whether the unit is answering and has given a value for this parameter."""
+        if fn == PANEL_LOCK_FN and self._force_lock:
+            return False  # "Panel lock (forced)" is in charge of the lock
         return self.available and fn in self.values
+
+    @property
+    def force_lock(self) -> bool:
+        """Return whether the integration keeps the front panel locked while connected."""
+        return self._force_lock
+
+    def set_force_lock(self, forced: bool) -> None:
+        """Turn "Panel lock (forced)" on or off. Turning it off leaves the panel as it is."""
+        if self._force_lock != forced:
+            self._force_lock = forced
+            if forced:
+                self.async_request_refresh()  # lock the panel now
+            self._notify()
+
+    def _set_busy(self, busy: bool) -> None:
+        if self.busy != busy:
+            self.busy = busy
+            self._notify()
 
     def add_listener(self, callback: Callable[[], None]) -> Callable[[], None]:
         """Register a callback for any state change; returns a remover."""
@@ -309,6 +345,7 @@ class Sp11dClient:
             await self._request(
                 bytes([STORE, 0x80, 0x80 | (preset - 1), self._address]), RECALL, None, retry=False
             )
+            self.last_store = (preset, datetime.now(UTC))  # the unit acknowledged it
             self._notify()
 
     async def async_reset_defaults(self) -> None:
@@ -357,6 +394,9 @@ class Sp11dClient:
             except TimeoutError as err:
                 if attempt + 1 >= attempts:
                     raise KramerTimeoutError("No reply from the unit") from err
+            except Sp11dBusyError as err:
+                self._record_error(str(err))
+                raise
             finally:
                 self._pending = None
         raise KramerTimeoutError("No reply from the unit")  # pragma: no cover
@@ -387,15 +427,23 @@ class Sp11dClient:
         self._full_refresh = True
         try:
             while True:
+                waiting = False
                 try:
                     await self._work()
+                except Sp11dBusyError:
+                    _LOGGER.debug("Unit is waiting for a front-panel entry; keeping the last values and trying again")
+                    self._full_refresh = True
+                    waiting = True
                 except KramerTimeoutError:
                     _LOGGER.debug("Unit is not answering; will retry")
                     self._set_available(False)
 
-                interval = self._refresh_interval if self.available else self._retry_interval
+                if self.busy:
+                    interval = self._busy_interval
+                else:
+                    interval = self._refresh_interval if self.available else self._retry_interval
                 self._refresh_event.clear()
-                if not self._dirty and not self._full_refresh:
+                if waiting or (not self._dirty and not self._full_refresh):
                     waiter = asyncio.create_task(self._refresh_event.wait())
                     try:
                         await asyncio.wait({reader_task, waiter}, timeout=interval, return_when=asyncio.FIRST_COMPLETED)
@@ -444,11 +492,24 @@ class Sp11dClient:
                         raise
             if self.firmware is None:
                 await self._read_identity()
+            if self._force_lock and self.values.get(PANEL_LOCK_FN) != 1:
+                await self._lock_panel()
         if not self.values:
             raise KramerTimeoutError("No reply from the unit")
         self._set_available(True)
         self._ready.set()
         self._notify()
+
+    async def _lock_panel(self) -> None:
+        """Lock the front panel (the caller holds the lock); a refusal is only logged."""
+        try:
+            reply = await self._request(frame(WRITE, PANEL_LOCK_FN, 1, self._address), WRITE, PANEL_LOCK_FN)
+        except Sp11dBusyError:
+            raise
+        except KramerTimeoutError:
+            _LOGGER.debug("The unit did not answer the request to lock the panel")
+            return
+        self.values[PANEL_LOCK_FN] = decode_value(*reply)
 
     async def _read_identity(self) -> None:
         """Ask the unit its machine name code and software version (best effort)."""
@@ -483,6 +544,12 @@ class Sp11dClient:
         instruction = first & 63
         param = param_byte & 127
         pending = self._pending
+        if instruction == BUSY:
+            self._set_busy(True)
+            if pending and not pending[2].done():
+                pending[2].set_exception(Sp11dBusyError(BUSY_MESSAGE))
+            return
+        self._set_busy(False)
         if instruction == IDENTIFY:
             if pending and pending[0] == IDENTIFY and not pending[2].done():
                 pending[2].set_result((param, value_byte & 127))

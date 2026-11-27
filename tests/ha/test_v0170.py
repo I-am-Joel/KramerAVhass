@@ -143,16 +143,16 @@ async def test_sp11d_preset_recall_store_and_panel(hass: HomeAssistant) -> None:
         "number", "set_value", {"entity_id": sp_ent(hass, entry, "number", "contrast"), "value": 55}, blocking=True
     )
     store_5 = sp_ent(hass, entry, "button", "store_preset_5")
-    with patch("custom_components.kramer.sp11d_entity.persistent_notification") as notification:
+    with pytest.raises(HomeAssistantError) as warning:
         await hass.services.async_call("button", "press", {"entity_id": store_5}, blocking=True)
-        assert sim.presets[4][5] == 0  # the first press only warns
-        message = notification.async_create.call_args.args[1]
-        assert message == (
-            "This will overwrite whatever is stored in preset 5 with the device's current settings. "
-            "This cannot be undone. Are you sure? Press the button again within 30 seconds to confirm."
-        )
-        await hass.services.async_call("button", "press", {"entity_id": store_5}, blocking=True)
-        notification.async_dismiss.assert_called_once()
+    assert sim.presets[4][5] == 0  # the first press only warns
+    assert str(warning.value) == (
+        "This will overwrite whatever is stored in preset 5 with the device's current settings. "
+        "This cannot be undone. Are you sure? Press the button again within 30 seconds to confirm."
+    )
+    assert hass.states.get(store_5).attributes["armed"] is True
+    await hass.services.async_call("button", "press", {"entity_id": store_5}, blocking=True)
+    assert hass.states.get(store_5).attributes["armed"] is False
     assert sim.presets[4][5] == 55 and sim.presets[2][5] == 40  # stored where asked, not in the preset in use
     assert any(instruction == 35 for instruction, *_ in sim.log)
     # A change on the front panel arrives as an announcement.
@@ -191,18 +191,14 @@ async def test_sp11d_reset_needs_two_presses(hass: HomeAssistant) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert await entry.runtime_data.client.async_wait_ready(5)
-    with patch("custom_components.kramer.sp11d_entity.persistent_notification") as notification:
+    with pytest.raises(HomeAssistantError) as warning:
         await hass.services.async_call("button", "press", {"entity_id": eid}, blocking=True)
-        assert sim.presets[0][5] == 2  # nothing happened yet
-        notification.async_create.assert_called_once()
-        message = notification.async_create.call_args.args[1]
-        assert message.startswith(
-            "This action will reset every parameter on the device and clears all stored presets. "
-            "This cannot be undone. Are you sure?"
-        )
-        assert "again within 30 seconds" in message
-        await hass.services.async_call("button", "press", {"entity_id": eid}, blocking=True)
-        notification.async_dismiss.assert_called_once()
+    assert sim.presets[0][5] == 2  # nothing happened yet
+    assert str(warning.value) == (
+        "This action will reset every parameter on the device and clears all stored presets. "
+        "This cannot be undone. Are you sure? Press the button again within 30 seconds to confirm."
+    )
+    await hass.services.async_call("button", "press", {"entity_id": eid}, blocking=True)
     await asyncio.sleep(0.6)
     assert all(value == 0 for preset in sim.presets for value in preset.values())
     assert hass.states.get(sp_ent(hass, entry, "number", "contrast")).state == "0"
@@ -218,14 +214,13 @@ async def test_sp11d_reset_second_press_too_late(hass: HomeAssistant) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert await entry.runtime_data.client.async_wait_ready(5)
-    times = iter([1000.0, 1000.0, 1100.0, 1100.0])
-    with (
-        patch("custom_components.kramer.sp11d_entity.persistent_notification") as notification,
-        patch("custom_components.kramer.sp11d_entity._now", lambda: next(times)),
-    ):
-        await hass.services.async_call("button", "press", {"entity_id": eid}, blocking=True)
-        await hass.services.async_call("button", "press", {"entity_id": eid}, blocking=True)
-        assert notification.async_create.call_count == 2
+    clock = [1000.0]
+    with patch("custom_components.kramer.entity._now", lambda: clock[0]):
+        with pytest.raises(HomeAssistantError):
+            await hass.services.async_call("button", "press", {"entity_id": eid}, blocking=True)
+        clock[0] = 1100.0
+        with pytest.raises(HomeAssistantError):  # too late: this is a first press again
+            await hass.services.async_call("button", "press", {"entity_id": eid}, blocking=True)
     assert sim.presets[0][5] == 2
     await sp_done(hass, entry, sim)
 
@@ -247,6 +242,31 @@ async def test_sp11d_unavailable_when_silent(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
     assert hass.states.get(sp_ent(hass, entry, "number", "contrast")).state == "unavailable"
     assert hass.states.get(sp_ent(hass, entry, "binary_sensor", "connection")).state == "off"
+    await sp_done(hass, entry, sim)
+
+
+async def test_sp11d_front_panel_entry_keeps_entities_available(hass: HomeAssistant) -> None:
+    """While a panel button flashes the unit refuses commands: say why and keep the last values."""
+    sim = Sp11dSim()
+    entry = await sp_setup(hass, sim)
+    client = entry.runtime_data.client
+    contrast = sp_ent(hass, entry, "number", "contrast")
+    sim.busy = True
+    with pytest.raises(HomeAssistantError, match="front panel"):
+        await hass.services.async_call(
+            "number", "set_value", {"entity_id": contrast, "value": 5}, blocking=True
+        )
+    assert client.busy
+    assert hass.states.get(contrast).state == "2"  # still the last known value, not unavailable
+    client.async_request_refresh()
+    await asyncio.sleep(0.3)
+    await hass.async_block_till_done()
+    assert hass.states.get(contrast).state == "2"
+    assert hass.states.get(sp_ent(hass, entry, "binary_sensor", "connection")).state == "on"
+    sim.busy = False
+    await hass.services.async_call("number", "set_value", {"entity_id": contrast, "value": 5}, blocking=True)
+    assert hass.states.get(contrast).state == "5"
+    assert not client.busy
     await sp_done(hass, entry, sim)
 
 
@@ -391,7 +411,7 @@ async def test_mixed_only_while_outputs_differ(hass: HomeAssistant) -> None:
 def test_every_model_states_its_serial_settings() -> None:
     """Every model's notes give the serial settings, and none lists what the device cannot do."""
     for key, model in MODELS.items():
-        assert "Serial settings: " in model.notes, key
+        assert "Serial settings" in model.notes, key
         assert "8 data bits, no parity, 1 stop bit" in model.notes, key
         assert "No presets" not in model.notes and "cannot be disconnected" not in model.notes, key
     assert "1200 baud" in MODELS["vs-1202yc"].notes
@@ -424,14 +444,15 @@ async def test_store_buttons_arm_separately(hass: HomeAssistant) -> None:
     entry = await sp_setup(hass, sim)
     five = sp_ent(hass, entry, "button", "store_preset_5")
     six = sp_ent(hass, entry, "button", "store_preset_6")
-    times = iter([1000.0, 1000.0, 1001.0, 1001.0, 1100.0, 1100.0])
-    with (
-        patch("custom_components.kramer.sp11d_entity.persistent_notification") as notification,
-        patch("custom_components.kramer.sp11d_entity._now", lambda: next(times)),
-    ):
-        await hass.services.async_call("button", "press", {"entity_id": five}, blocking=True)
-        await hass.services.async_call("button", "press", {"entity_id": six}, blocking=True)
-        await hass.services.async_call("button", "press", {"entity_id": five}, blocking=True)
-        assert notification.async_create.call_count == 3
+    clock = [1000.0]
+    with patch("custom_components.kramer.entity._now", lambda: clock[0]):
+        with pytest.raises(HomeAssistantError):
+            await hass.services.async_call("button", "press", {"entity_id": five}, blocking=True)
+        clock[0] = 1001.0
+        with pytest.raises(HomeAssistantError):  # a different button is not armed by this one
+            await hass.services.async_call("button", "press", {"entity_id": six}, blocking=True)
+        clock[0] = 1100.0
+        with pytest.raises(HomeAssistantError):  # too late for the first
+            await hass.services.async_call("button", "press", {"entity_id": five}, blocking=True)
     assert not any(instruction == 35 for instruction, *_ in sim.log)
     await sp_done(hass, entry, sim)

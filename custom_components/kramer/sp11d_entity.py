@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
-from homeassistant.components import persistent_notification
 from homeassistant.components.button import ButtonEntity
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.components.select import SelectEntity
@@ -14,7 +12,8 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
 from homeassistant.exceptions import HomeAssistantError
 
-from .entity import KramerConfigEntry, KramerEntity
+from .const import CONF_FORCE_LOCK
+from .entity import KramerConfigEntry, KramerEntity, DoublePressButton
 from .sp11d_defs import (
     CONTROLS,
     PRESET_COUNT,
@@ -29,16 +28,11 @@ RESET_WARNING = (
     "This action will reset every parameter on the device and clears all stored presets. "
     "This cannot be undone. Are you sure?"
 )
-RESET_CONFIRM_SECONDS = 30
 STORE_WARNING = (
     "This will overwrite whatever is stored in preset {preset} with the device's current settings. "
     "This cannot be undone. Are you sure?"
 )
-
-
-def _now() -> float:
-    """Return a clock reading in seconds that only moves forward."""
-    return time.monotonic()
+PANEL_LOCK_FORCED_REASON = 'Unavailable because "Panel lock (forced)" is on. Turn that off first.'
 
 
 class Sp11dEntity(KramerEntity):
@@ -208,66 +202,103 @@ class Sp11dStepButton(KramerEntity, ButtonEntity):
         await self._call(self._client.async_set(self._fn, wanted))
 
 
-class Sp11dStoreButton(KramerEntity, ButtonEntity):
-    """Stores the present settings in one chosen preset, as STORE, the preset number, STORE does on the front panel.
-
-    It needs two presses: the first shows a warning and a second within 30 seconds stores.
-    """
+class Sp11dStoreButton(DoublePressButton):
+    """Stores the present settings in one chosen preset, as STORE, the preset number, STORE does on the front panel."""
 
     _attr_icon = "mdi:content-save"
 
     def __init__(self, entry: KramerConfigEntry, preset: int) -> None:
         """Initialise."""
         super().__init__(entry, f"store_preset_{preset}")
-        self._attr_name = f"Store to preset {preset}"
+        self._attr_name = f"Double press to store to preset {preset}"
         self._preset = preset
-        self._armed_until = 0.0
-        self._notification_id = f"kramer_store_preset_{entry.entry_id}_{preset}"
+        self._warning = STORE_WARNING.format(preset=preset)
 
-    async def async_press(self) -> None:
-        """First press: show the warning. A second press within 30 seconds: store."""
-        if _now() <= self._armed_until:
-            self._armed_until = 0.0
-            persistent_notification.async_dismiss(self.hass, self._notification_id)
-            await self._call(self._client.async_store(self._preset))
-            return
-        self._armed_until = _now() + RESET_CONFIRM_SECONDS
-        persistent_notification.async_create(
-            self.hass,
-            f"{STORE_WARNING.format(preset=self._preset)} "
-            f"Press the button again within {RESET_CONFIRM_SECONDS} seconds to confirm.",
-            title=f"Store to preset {self._preset}",
-            notification_id=self._notification_id,
-        )
+    async def _act(self) -> None:
+        await self._call(self._client.async_store(self._preset))
 
 
-class Sp11dResetButton(KramerEntity, ButtonEntity):
-    """Resets every parameter in every preset to 0. Disabled until switched on; needs two presses."""
+class Sp11dResetButton(DoublePressButton):
+    """Resets every parameter in every preset to 0. Disabled until switched on."""
 
-    _attr_name = "Reset all defaults"
+    _attr_name = "Double press to reset all defaults"
     _attr_icon = "mdi:restore-alert"
     _attr_entity_registry_enabled_default = False
+    _warning = RESET_WARNING
 
     def __init__(self, entry: KramerConfigEntry) -> None:
         """Initialise."""
         super().__init__(entry, "reset_defaults")
-        self._armed_until = 0.0
-        self._notification_id = f"kramer_reset_defaults_{entry.entry_id}"
 
-    async def async_press(self) -> None:
-        """First press: show the warning. A second press within 30 seconds: reset."""
-        if _now() <= self._armed_until:
-            self._armed_until = 0.0
-            persistent_notification.async_dismiss(self.hass, self._notification_id)
-            await self._call(self._client.async_reset_defaults())
-            return
-        self._armed_until = _now() + RESET_CONFIRM_SECONDS
-        persistent_notification.async_create(
-            self.hass,
-            f"{RESET_WARNING}\n\nPress the button again within {RESET_CONFIRM_SECONDS} seconds to confirm.",
-            title="Reset all defaults",
-            notification_id=self._notification_id,
-        )
+    async def _act(self) -> None:
+        await self._call(self._client.async_reset_defaults())
+
+
+class Sp11dLastStoreSensor(KramerEntity, SensorEntity):
+    """The preset the device last acknowledged storing to (since Home Assistant started), with the time."""
+
+    _attr_name = "Double pressed preset (last recorded action)"
+    _attr_icon = "mdi:content-save-check"
+
+    def __init__(self, entry: KramerConfigEntry) -> None:
+        """Initialise."""
+        super().__init__(entry, "last_stored_preset")
+
+    @property
+    def available(self) -> bool:
+        """Always readable: it only reports what was recorded."""
+        return True
+
+    @property
+    def native_value(self) -> str | None:
+        """Return for example "Preset 16"."""
+        stored = self._client.last_store
+        return None if stored is None else f"Preset {stored[0]}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        """Return when it was stored."""
+        stored = self._client.last_store
+        return {"time": None if stored is None else stored[1].isoformat()}
+
+
+class Sp11dForcedLockSwitch(KramerEntity, SwitchEntity):
+    """Keeps the front panel locked whenever the integration is connected (saved in the device's settings)."""
+
+    _attr_name = "Panel lock (forced)"
+    _attr_icon = "mdi:lock-alert"
+
+    def __init__(self, entry: KramerConfigEntry) -> None:
+        """Initialise."""
+        super().__init__(entry, "panel_lock_forced")
+        self._entry = entry
+
+    @property
+    def available(self) -> bool:
+        """Always usable: this is a Home Assistant setting, so it works even if the device is off."""
+        return True
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether the panel is kept locked."""
+        return self._client.force_lock
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        """Say why "Panel lock" cannot be used while this is on."""
+        return {"panel_lock": PANEL_LOCK_FORCED_REASON} if self._client.force_lock else {}
+
+    def _save(self, forced: bool) -> None:
+        self.hass.config_entries.async_update_entry(self._entry, data={**self._entry.data, CONF_FORCE_LOCK: forced})
+        self._client.set_force_lock(forced)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Lock the panel now and keep it locked."""
+        self._save(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Stop keeping the panel locked (it is left as it is)."""
+        self._save(False)
 
 
 _BY_KIND = {
@@ -288,9 +319,12 @@ def build(entry: KramerConfigEntry, kind: str) -> list[KramerEntity]:
         entities.append(Sp11dResetButton(entry))
         return entities
     entities = [_BY_KIND[c.kind](entry, c) for c in CONTROLS if c.kind == kind]
+    if kind == KIND_SWITCH:
+        entities.append(Sp11dForcedLockSwitch(entry))
     if kind == KIND_SELECT:
         entities.append(Sp11dPresetSelect(entry))
     if kind == KIND_SENSOR:
         entities.append(Sp11dIdentitySensor(entry, "firmware", "Firmware version", "firmware"))
         entities.append(Sp11dIdentitySensor(entry, "model_code", "Model code", "model_code"))
+        entities.append(Sp11dLastStoreSensor(entry))
     return entities

@@ -13,6 +13,7 @@ from .vp729_defs import KIND_NUMBER, KIND_SELECT, KIND_SENSOR, KIND_SWITCH
 PRESET_COUNT = 16
 PRESET_FN = 27  # the preset in use (read only; changed by recalling one)
 FREEZE_FN = 26
+PANEL_LOCK_FN = 23
 OUTPUT_STANDARD_FN = 21
 SCH_FN = 24
 DELAY_FN = 25
@@ -81,7 +82,7 @@ CONTROLS: tuple[Sp11dControl, ...] = (
     _number(SCH_FN, "sch", "SCH", -100, 100, "mdi:sine-wave"),
     _number(DELAY_FN, "delay", "Delay", -32, 31, "mdi:timer-outline"),
     _switch(22, "genlock", "Genlock", "mdi:sync"),
-    _switch(23, "panel_lock", "Panel lock", "mdi:lock"),
+    _switch(PANEL_LOCK_FN, "panel_lock", "Panel lock", "mdi:lock"),
     _switch(FREEZE_FN, "freeze", "Freeze", "mdi:snowflake"),
     Sp11dControl(
         DETECTED_STANDARD_FN,

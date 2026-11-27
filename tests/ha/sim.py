@@ -35,6 +35,7 @@ class Sim:
         self.has_lock = lock
         self.has_identify = identify
         self.has_audio_status = audio
+        self.busy = False  # answer every command with error 3, as a unit with a flashing front-panel button does
         self.slots: dict[int, dict] = {}
         self.writers: list[asyncio.StreamWriter] = []
         self.log: list[bytes] = []
@@ -67,7 +68,10 @@ class Sim:
         self.writers.append(w)
         buf = bytearray()
         while True:
-            data = await r.read(64)
+            try:
+                data = await r.read(64)
+            except ConnectionError:
+                return
             if not data:
                 return
             buf.extend(data)
@@ -77,7 +81,7 @@ class Sim:
                 self.log.append(
                     p.build_packet(k.instruction, k.input, k.output, k.machine)
                 )
-                for out in self.reply(k):
+                for out in [self.error(3)] if self.busy else self.reply(k):
                     w.write(out)
                 await w.drain()
 

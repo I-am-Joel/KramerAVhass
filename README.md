@@ -8,7 +8,7 @@ the unit.
 This is a fork of [krohrbaugh/kramer-homeassistant][original] by Kevin
 Rohrbaugh, and it would not exist without his work. See [Credits](#credits).
 
-A newly-built, custom dashboard card for switchers and matrices for use with this integration is at https://github.com/I-am-Joel/kramerav-matrix-panel-card
+A newly-built, custom dashboard card for switchers and matrices is included with this integration.
 
 <img width="1800" height="406" alt="VS-812" src="https://github.com/user-attachments/assets/bf5bd08c-208e-443d-acc4-4c3a5d2bc133" />
 
@@ -280,3 +280,119 @@ MIT, as the original. The original copyright notice is kept in
 
 [original]: https://github.com/krohrbaugh/kramer-homeassistant
 [p2000]: https://kramerav.com/downloads/protocols/protocol_2000_rev0_51.pdf
+
+
+# KramerAV Matrix Panel Card
+
+<img width="1800" height="406" alt="The card displaying a Kramer VS-812 8 way switcher" src="https://github.com/user-attachments/assets/2898fd2f-47b4-4507-918a-464c645ef93d" />
+
+A Home Assistant dashboard card that shows a Kramer matrix switcher as a virtual front panel and controls it the way the real unit works: choose an output, then choose an input.
+
+It works with the [KramerAVhass integration](https://github.com/I-am-Joel/KramerAVhass) (version 0.14.2 or later). The card reads the integration's **Status** sensor and calls the integration's actions.
+
+<img width="1818" height="1488" alt="The card displaying a Kramer VS-162AV matrix switcher" src="https://github.com/user-attachments/assets/985882ba-6103-433d-b8a5-7d986eb5d41e" />
+
+
+## What it does
+
+- Routing: press an output (or **ALL**), then an input. The route is sent when the input is pressed.
+- **OFF** disconnects the chosen output, on models that support this. A disconnected output shows `--`.
+- **VIDEO**, **AUDIO** and **AFV** show and enable independent control of audio and video layers on models with separate audio and video switching.
+- **STO** and **RCL** store and recall presets. On a unit with more presets than input buttons (for example 60 presets and 16 input buttons), the input buttons act as digits, with button "10" as "0". The card's virtual LCD window shows prompts with a flashing colon, and the digits appear after it as you press them (`STORE: SELECT PRESET USING INPUT NUMBERS: 15`). Press two digits for a two-digit preset (**10** then **3** gives preset 3 straight away). If you press a single digit and stop, it is used as it stands after four seconds. A store needs **TAKE**; a filled preset needs **TAKE** to overwrite it. A recall needs no **TAKE**. Where every preset has its own input button, one press chooses it.
+- A three-line virtual LCD status window shows what is happening, and seven segment displays show which input feeds each output.
+- A straight (single-output) switch gets a simpler panel automatically: there is no OUTPUT section, no ALL button and no INPUT heading, and pressing an input routes it at once (`INPUT 05 > OUTPUT`). The lit input button shows the current route.
+- **Six optional custom buttons** run any Home Assistant action (a script, a scene or any action call). Each can be set to need **TAKE** first, if wanted. To switch a device, choose **Perform action** and pick the action (for example `light.toggle`) and its target. **Toggle** and **More info** act on an optional **Entity** set for that button.
+<img width="1010" height="1096" alt="Define up to six of your own custom buttons" src="https://github.com/user-attachments/assets/d875dd4d-0fab-478b-b283-6bfb9c39120f" />
+- **LOCK** locks that one display (held in that browser, surviving a reload), so a wall panel can be protected from stray touches. It does not touch the unit's own front panel lock or other instances of the dashboard card. Hold the button for three seconds (you can change this in the editor) to lock or unlock. A normal tap only shows `HOLD FOR 3 SECONDS TO LOCK`, so an accidental touch cannot lock the panel. The window then shows `PANEL LOCKED` or `PANEL UNLOCKED`.
+- Press and hold any button on a touch screen to see its long name in the status window.
+- **Powered off.** When the device is powered off or not reachable by the integration, the card display's lights go out, the seven segment displays go dark, the window shows `OFFLINE` and presses do nothing. The panel will automatically light up and its latest routing be displayed when power or the connection is restored.
+
+## Installation
+
+1. In HACS, open the menu (three dots), choose **Custom repositories**, add `https://github.com/I-am-Joel/kramerav-matrix-panel-card` with the type **Dashboard**, and choose **Add**.
+2. Find **KramerAV Matrix Panel Card** in HACS and choose **Download**.
+3. Reload your browser (a hard refresh). HACS adds the card as a dashboard resource itself.
+4. Edit a dashboard, choose **Add card**, and pick **Kramer Matrix Panel**.
+
+## Setting it up
+
+In the card editor, choose the unit's **Status** sensor (for example `sensor.dining_room_status`). Only the Status sensors of your Kramer switchers are listed. Everything else is optional. The editor has four tabs:
+
+| Tab | What it holds |
+| --- | --- |
+| Configuration | The unit; buttons per row (2, 4, 8, 16 or 32); display/hide: rack-mount ears, the status window, the seven segment displays (and their colour), the function buttons panel (STO, RCL, LOCK, ALL, OFF and TAKE), the LOCK button (and its hold time) and the custom buttons panel. Additional settings to define the hold time before a button's long name is shown and the model number text (with a switch that hides the text and the line above it, for a slightly shorter card). For a unit with a single output the seven segment options are not shown. |
+| Button styles | Customisable button colours for video, audio and audio follows video statuses, with colour-blind-safe defaults and a "Return to default" button. |
+| Custom buttons | Customisable panel heading, then six expandable rows. Each button has a label (up to four characters), a long name, an action, an optional entity (for Toggle and More info), and "Enforce PRESS "TAKE" before running". Every button's row has a Show switch (a hidden button is greyed out in the editor and the remaining buttons close up on the card to fill the gap it leaves), handles to change button order and delete. |
+| Button names | Short (four-character) and long names for video inputs, audio inputs, video outputs and audio outputs (the output lists are not shown for a single-output unit). Short labels can be blank. Each list has a paste box (one name per line) and the option to "Use the integration's names". |
+
+<img width="2054" height="1410" alt="Kramer matrix card editor view" src="https://github.com/user-attachments/assets/fb86f771-866f-45b7-b167-f05381fa8f0c" />
+
+Names default to those defined in the integration but can be renamed in each card. A short label for a button whose integration name is still at default (eg "Input 001 Video") is left blank and the button shows only its panel number.
+
+<img width="676" height="574" alt="kramer-matrix-card-custom-buttons" src="https://github.com/user-attachments/assets/7c71917e-d4c6-4337-98fb-43301f162aeb" />
+
+### YAML
+
+```yaml
+type: custom:kramerav-matrix-panel-card
+entity: sensor.dining_room_status
+buttons_per_row: 8          # 2, 4, 8, 16 or 32 (automatic if left out)
+rack_ears: true
+lock_button: true
+show_function: true         # false hides STO, RCL, LOCK, ALL, OFF and TAKE
+show_custom_buttons: true   # false hides the custom buttons (their settings are kept)
+show_window: true
+show_segments: true
+segment_color: "#ff2a24"
+hold_time: 0.8              # press-and-hold for long names, seconds, 0.3 to 3
+lock_hold_time: 3           # hold time for LOCK only, seconds, 1 to 10
+model_text: ""              # blank shows the model name
+show_model_text: true       # false hides the model text and the line above it
+colors:
+  video: "#56b4e9"
+  audio: "#e69f00"
+  together: "#009e73"
+user_heading: USER
+user_buttons:
+  - label: FILM
+    name: Film mode
+    hidden: false             # true hides this button on the card
+    enforce_take: true
+    entity: light.hall        # optional: for Toggle and More info
+    action:
+      action: perform-action
+      perform_action: script.film_mode
+names:
+  video_outputs:
+    - short: LNGE
+      long: Lounge
+```
+
+## Messages when the sensor cannot be used
+
+| Message | What it means |
+| --- | --- |
+| Selected sensor not found. Check if device or integration is offline and that the sensor name is correct. | The sensor is missing, or it is `unavailable` with no layout (the integration is not loaded, or it is older than 0.14.3 and the unit is off). |
+| Selected sensor is incorrect. A Kramer Status sensor must be selected. | The sensor exists but is not a Kramer Status sensor. |
+
+## Limits
+
+- The offline panel needs integration 0.14.3 or later. With an older integration a powered-off unit shows the first message above.
+- One unit per card. Several units, daisy-chaining, other brands and the VP-729 scaler are not supported.
+- The card does not show the unit's own front panel lock state.
+- For custom buttons that call an action (`perform-action`), the card reports success or failure. Other action types (navigate, URL, more info, toggle) are handed to Home Assistant, which does not report back, so they always show as done.
+
+## Accessibility
+
+<img width="2050" height="1144" alt="Define the card's button colours" src="https://github.com/user-attachments/assets/85948c74-4f2a-4579-ae49-1fc09ad2fc90" />
+
+- Every button can be reached with Tab and pressed with Enter or Space, and the focused button has a clear outline. To lock or unlock from the keyboard, hold Enter or Space on LOCK for the lock hold time.
+- Each button announces its long name and state, for example "Output 3, Kitchen, selected". The status window is announced when its message changes.
+- Nothing depends on colour alone, and all colours can be changed.
+- With reduced motion requested, flashing becomes a steady light and scrolling stops. Nothing flashes more than three times a second.
+
+## Licences
+
+The card is released under the MIT licence (see `LICENSE`). The embedded fonts (Orbitron, Share Tech Mono and Barlow Semi Condensed) are under the SIL Open Font Licence 1.1 (see `FONT-LICENCES.md`).
+
+This integration was not written by, or with the endorsement or support of, Kramer AV but meets the need to extend the life of models that are no longer supported by the manufacturer and might otherwise go to landfill.

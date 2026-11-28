@@ -14,6 +14,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .address import blocking_entry
+from .card import async_register_card
 from .const import (
     CONF_AUDIO_INPUT_NAMES,
     CONF_AUDIO_OUTPUT_NAMES,
@@ -143,8 +144,9 @@ def legacy_output_names(count: int) -> list[set[str]]:
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the actions (once, for all units)."""
+    """Register the actions and the dashboard card (once, for all units)."""
     async_register_services(hass)
+    await async_register_card(hass)
     return True
 
 

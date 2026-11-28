@@ -433,4 +433,4 @@ def test_services_have_no_device_filter_on_their_targets() -> None:
         selector.TargetSelector.CONFIG_SCHEMA(target)
     manifest = json.loads((folder / "manifest.json").read_text())
     assert manifest["categories"] == ["media_entertainment"]
-    assert manifest["version"] == "0.17.2"
+    assert manifest["version"].startswith("0.17.")

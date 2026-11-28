@@ -54,6 +54,7 @@ class Sp11dSim:
         self.load(0)
         self.restart_seconds = 0.2
         self.silent = False
+        self.deaf: set[tuple[int, int]] = set()  # (instruction, parameter) never answered
         self.busy = False  # a front-panel entry is waiting for a number
         self.server: asyncio.AbstractServer | None = None
         self.writers: list[asyncio.StreamWriter] = []
@@ -119,6 +120,8 @@ class Sp11dSim:
         value = (((address_byte >> 6) & 1) << 7) | (value_byte & 127)
         value = value - 256 if value >= 128 else value
         self.log.append((instruction, param, value, address_byte))
+        if (instruction, param) in self.deaf:
+            return
         if self.busy:
             writer.write(_encode(0x50, 0, 0, self.address))  # the unit's busy answer to any command
             return

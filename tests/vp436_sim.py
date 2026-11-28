@@ -45,6 +45,7 @@ class Vp436Sim:
         self.log: list[str] = []
         self.keys: list[int] = []
         self.silent = False
+        self.deaf: set[str] = set()  # command lines that are never answered
         self.writers: list[asyncio.StreamWriter] = []
         self.server: asyncio.AbstractServer | None = None
         self.port = 0
@@ -106,7 +107,7 @@ class Vp436Sim:
             while b"\r" in buffer:
                 line, buffer = buffer.split(b"\r", 1)
                 text = line.decode("ascii").strip()
-                if not text or self.silent:
+                if not text or self.silent or text in self.deaf:
                     continue
                 self.log.append(text)
                 writer.write(self.reply(text).encode("ascii"))

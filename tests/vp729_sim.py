@@ -47,6 +47,7 @@ class Vp729Sim:
         self.state[91] = 1
         self.log: list[str] = []
         self.silent_for = 0.0
+        self.deaf: set[str] = set()  # command lines that are never answered
         self.garble_next = False
         self.lag = 0.0  # seconds before an accepted value shows in a read
         self.save_delay = 0.0  # seconds before a profile save is acknowledged
@@ -138,6 +139,9 @@ class Vp729Sim:
             while True:
                 raw = await reader.readuntil(b"\r")
                 line = raw.decode().strip()
+                if line in self.deaf:
+                    self.dropped.append(line)
+                    continue
                 if time.monotonic() < self.mute_until:
                     self.dropped.append(line)  # the unit is busy: no echo, no reply
                     continue

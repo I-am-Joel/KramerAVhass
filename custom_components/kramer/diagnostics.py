@@ -15,6 +15,7 @@ from .const import (
     CONF_PRESET_DESCRIPTIONS,
 )
 from .entity import KramerConfigEntry, Sp11dData, Vp436Data, Vp729Data
+from .sp11d_defs import BY_FN as BY_FN_SP
 
 TO_REDACT = {
     CONF_HOST,
@@ -52,6 +53,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
                 "busy": client.busy,
                 "force_lock": client.force_lock,
                 "values": {str(fn): value for fn, value in sorted(client.values.items())},
+                "left_out_reads": [BY_FN_SP.get(fn).name if BY_FN_SP.get(fn) else fn for fn in sorted(client.quarantined)],
+                "unexpected_replies": dict(client.unmatched),
                 "last_reply": client.last_reply.isoformat() if client.last_reply else None,
                 "last_error": client.last_error,
                 "last_error_time": client.last_error_time.isoformat() if client.last_error_time else None,
@@ -77,6 +80,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
                 "values": dict(sorted(client.values.items())),
                 "signal": client.signal,
                 "unsupported": sorted(client.unsupported),
+                "left_out_reads": sorted(client.quarantined),
+                "unexpected_replies": dict(client.unmatched),
                 "last_reply": client.last_reply.isoformat() if client.last_reply else None,
                 "last_error": client.last_error,
                 "last_error_time": client.last_error_time.isoformat() if client.last_error_time else None,
@@ -100,6 +105,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
                 "available": client.available,
                 "values": {str(fn): value for fn, value in sorted(client.values.items())},
                 "unavailable_functions": {str(fn): code for fn, code in sorted(client.errors.items())},
+                "left_out_reads": [str(fn) for fn in sorted(client.quarantined)],
+                "unexpected_replies": dict(client.unmatched),
                 "last_reply": client.last_reply.isoformat() if client.last_reply else None,
                 "last_error": client.last_error,
                 "last_error_time": client.last_error_time.isoformat() if client.last_error_time else None,
@@ -136,6 +143,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: KramerC
             "levels": dict(client.levels),
             "filled_preset_slots": sorted(slot for slot, filled in client.preset_defined.items() if filled),
             "last_reply": client.last_reply.isoformat() if client.last_reply else None,
+            "left_out_reads": sorted(client.quarantined),
+            "unmatched_packets": dict(client.unmatched),
             "last_error": client.last_error,
             "last_error_time": client.last_error_time.isoformat() if client.last_error_time else None,
         },

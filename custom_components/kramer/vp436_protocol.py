@@ -36,15 +36,18 @@ import contextlib
 import logging
 import re
 import time
+from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 
 from .protocol import (
+    QUARANTINE_AFTER,
     KramerCommandError,
     KramerConnectionError,
     KramerTimeoutError,
     _close,
     _enable_keepalive,
+    say_name,
 )
 from .vp436_defs import (
     BY_KEY,
@@ -54,6 +57,7 @@ from .vp436_defs import (
     FACTORY_RESET_SETTLE_SECONDS,
     GET_LEVEL,
     INPUT_KEY,
+    KEY_BUTTONS,
     KEY_TYPE,
     PER_INPUT_KEYS,
     POWER_KEY,
@@ -75,6 +79,9 @@ _REPLY = re.compile(r"^Z\s+(\d)\s+(\d+)(?:\s+(-?\d+))?\s*$")
 _RANGE_ERROR = re.compile(r"^Y-(\d)-(\d+)-\[(-?\d+)~(-?\d+)\]")
 _UNKNOWN_ERROR = re.compile(r"^Y-(\d)-(?:\d+-)?\[\?\?\]")
 _FIRMWARE = re.compile(r"\b(V\d+\.\d+)\b")
+
+KEY_NAMES = {number: name for _key, name, number, _icon in KEY_BUTTONS}
+
 
 PACING_GAP = 0.05  # a short pause after each answer, before the next command
 DONE_WAIT = 0.15  # how long to wait for the "DONE" that usually follows a set
@@ -167,6 +174,10 @@ class Vp436Client:
         self._writer: asyncio.StreamWriter | None = None
         self._lock = asyncio.Lock()
         self._pending: tuple[int, int, asyncio.Future] | None = None
+        self._heard: deque[str] = deque(maxlen=4)  # what the device sent while a request waited
+        self._strikes: dict[str, int] = {}  # reads that got no answer, in a row
+        self.quarantined: set[str] = set()  # reads left out because they never get an answer
+        self.unmatched: dict[str, str] = {}  # what the device said instead, by request
         self._listeners: list[Callable[[], None]] = []
         self._refresh_event = asyncio.Event()
         self._ready = asyncio.Event()
@@ -301,11 +312,16 @@ class Vp436Client:
     async def async_set(self, control: Vp436Control, value: int) -> None:
         """Set a setting. The unit's echo shows the value it applied; if only the newest of several fast changes."""
         self._check_value(control, value)
+        what = f"setting {say_name(control.name)}"
+        if control.kind == KIND_NUMBER:
+            what += f" to {value}"
+        elif control.options is not None:
+            what += f" to {control.options[value]}"
         seq = self._set_seq[control.key] = self._set_seq.get(control.key, 0) + 1
         async with self._lock:
             if self._set_seq.get(control.key) != seq:
                 return  # replaced by a newer value while waiting its turn
-            reply = await self._send(control.set_type, control.fn, value)
+            reply = await self._send(control.set_type, control.fn, value, what=what)
             applied = value if reply is None else reply
             self.values[control.key] = applied
             self._after_change(control.key)
@@ -317,7 +333,7 @@ class Vp436Client:
                 self.async_request_refresh()  # woke up or went to standby: read it all again
             self._notify()
         if applied != value:
-            message = f"The device did not accept that value (it kept {applied})"
+            message = f"The device did not accept that value (it kept {applied}) ({what})"
             self._record_error(message)
             raise Vp436CommandError(message)
 
@@ -333,22 +349,22 @@ class Vp436Client:
     async def async_press(self, number: int) -> None:
         """Send a key press (the same as the key on the remote control)."""
         async with self._lock:
-            await self._send(KEY_TYPE, number, None, retry=False)
+            await self._send(KEY_TYPE, number, None, retry=False, what=f"pressing {KEY_NAMES.get(number, f'key {number}')}")
         if number in VOLUME_KEYS:
             self._mark_dirty("output_volume")  # the volume buttons are not announced
 
     async def async_reboot(self) -> None:
         """Restart the device (it is silent for about 5 seconds)."""
-        await self._slow_command(REBOOT, REBOOT_SETTLE_SECONDS)
+        await self._slow_command(REBOOT, REBOOT_SETTLE_SECONDS, "restarting the device")
 
     async def async_factory_reset(self) -> None:
         """Restore every setting to its factory default (about 8 seconds)."""
-        await self._slow_command(FACTORY_RESET, FACTORY_RESET_SETTLE_SECONDS)
+        await self._slow_command(FACTORY_RESET, FACTORY_RESET_SETTLE_SECONDS, "restoring the factory settings")
 
-    async def _slow_command(self, command: tuple[int, int, int], settle: float) -> None:
+    async def _slow_command(self, command: tuple[int, int, int], settle: float, what: str) -> None:
         set_type, fn, value = command
         async with self._lock:
-            await self._send(set_type, fn, value, retry=False)
+            await self._send(set_type, fn, value, retry=False, what=what)
             self._settle(settle)
         self.async_request_refresh()
 
@@ -366,7 +382,14 @@ class Vp436Client:
             self._mark_dirty(*PER_INPUT_KEYS, signal=True)  # each kind of input has its own picture settings
 
     async def _send(
-        self, set_type: int, fn: int, value: int | None, *, retry: bool = True, timeout: float | None = None
+        self,
+        set_type: int,
+        fn: int,
+        value: int | None,
+        *,
+        retry: bool = True,
+        timeout: float | None = None,
+        what: str | None = None,
     ) -> int | None:
         """Send one command and return the value in its answer; the caller holds the lock.
 
@@ -376,13 +399,16 @@ class Vp436Client:
         attempts = 2 if retry else 1
         for attempt in range(attempts):
             try:
-                return await self._send_once(set_type, fn, value, timeout)
+                return await self._send_once(set_type, fn, value, timeout, what)
             except KramerTimeoutError:
                 if attempt + 1 >= attempts:
                     raise
         return None  # pragma: no cover
 
-    async def _send_once(self, command_type: int, fn: int, value: int | None, timeout: float | None) -> int | None:
+    async def _send_once(
+        self, command_type: int, fn: int, value: int | None, timeout: float | None, what: str | None = None
+    ) -> int | None:
+        suffix = f" ({what})" if what else ""
         command = f"Y {command_type} {fn}" + ("" if value is None else f" {value}")
         delay = self._hold_until - time.monotonic()
         if delay > 0:
@@ -392,14 +418,20 @@ class Vp436Client:
             raise KramerConnectionError("Not connected")
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending = (command_type, fn, future)
+        self._heard.clear()
         self._done.clear()
         try:
             writer.write(f"{command}\r".encode("ascii"))
             await writer.drain()
             reply = await asyncio.wait_for(future, timeout or self._request_timeout)
         except TimeoutError as err:
-            self._record_error(f"No reply to {command}")
-            raise KramerTimeoutError(f"No reply to {command}") from err
+            self.unmatched[what or command] = " | ".join(self._heard) or "(nothing)"
+            self._record_error(f"No reply to {command}{suffix}")
+            raise KramerTimeoutError(f"No reply to {command}{suffix}") from err
+        except Vp436CommandError as err:
+            if suffix:
+                raise Vp436CommandError(f"{err}{suffix}", unknown=err.unknown) from err
+            raise
         except OSError as err:
             raise KramerConnectionError(str(err)) from err
         finally:
@@ -413,7 +445,7 @@ class Vp436Client:
     async def _read_control(self, control: Vp436Control) -> None:
         """Read one setting and record the value (or that this device does not have it); the caller holds the lock."""
         try:
-            value = await self._send(control.get_type, control.fn, None)
+            value = await self._send(control.get_type, control.fn, None, what=f"reading {say_name(control.name)}")
         except Vp436CommandError as err:
             if err.unknown:
                 self.unsupported.add(control.key)
@@ -431,7 +463,7 @@ class Vp436Client:
     async def _read_signal(self) -> None:
         """Read the signal indicator (0 while a signal is present); the caller holds the lock."""
         try:
-            value = await self._send(GET_LEVEL, SIGNAL_FN, None)
+            value = await self._send(GET_LEVEL, SIGNAL_FN, None, what="reading the signal state")
         except Vp436CommandError:
             return
         if value is not None and self.signal != value:
@@ -526,16 +558,36 @@ class Vp436Client:
     async def _refresh(self) -> None:
         """Read every setting (the power state first, so a device that is just waking is noticed)."""
         timeouts = 0
+        answered = False  # the device has answered something in this refresh, so it is alive
+        suspects: list[str] = []  # silent reads from before the first answer: they count once the device proves alive
         async with self._lock:
-            await self._read_control(BY_KEY[POWER_KEY])
-            for control in CONTROLS:
-                if control.key == POWER_KEY or control.key in self.unsupported:
+            for control in sorted(CONTROLS, key=lambda c: c.key != POWER_KEY):  # the power state first
+                if control.key != POWER_KEY and control.key in self.unsupported:
+                    continue
+                if self._strikes.get(control.key, 0) >= QUARANTINE_AFTER:
+                    if control.key not in self.quarantined:
+                        self.quarantined.add(control.key)
+                        _LOGGER.warning(
+                            "The device did not answer a read of %s %d times in a row: leaving it out of the readings",
+                            control.name,
+                            QUARANTINE_AFTER,
+                        )
                     continue
                 try:
                     await self._read_control(control)
                     timeouts = 0
+                    for silent in suspects:
+                        self._strikes[silent] = self._strikes.get(silent, 0) + 1
+                    suspects.clear()
+                    answered = True
+                    self._strikes.pop(control.key, None)
+                    self.quarantined.discard(control.key)
                 except KramerTimeoutError:
                     timeouts += 1
+                    if answered:
+                        self._strikes[control.key] = self._strikes.get(control.key, 0) + 1
+                    else:
+                        suspects.append(control.key)
                     if timeouts >= 3:
                         raise
             try:
@@ -566,6 +618,8 @@ class Vp436Client:
         _LOGGER.debug("Received %r", line)
         self.last_reply = datetime.now(UTC)
         pending = self._pending
+        if pending and not pending[2].done():
+            self._heard.append(line)
         if line == "DONE":
             self._done.set()
             return

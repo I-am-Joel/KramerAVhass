@@ -89,6 +89,8 @@ class TwoByteSim(_Base):
                 if first & 7 != self.m - 1 or first & 0x78:
                     continue
                 self.log.append(bytes([first, second]))
+                if getattr(self, "silent", False):
+                    continue
                 w.write(self.reply(second))
                 await w.drain()
 

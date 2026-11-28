@@ -1,7 +1,5 @@
 set_route:
-  target:
-    device:
-      integration: kramer
+  target: {}
   fields:
     input:
       required: true
@@ -26,9 +24,7 @@ set_route:
           translation_key: layer
 
 store_preset:
-  target:
-    device:
-      integration: kramer
+  target: {}
   fields:
     preset:
       required: true
@@ -47,9 +43,7 @@ store_preset:
         boolean:
 
 recall_preset:
-  target:
-    device:
-      integration: kramer
+  target: {}
   fields:
     preset:
       required: true
@@ -63,9 +57,7 @@ recall_preset:
         boolean:
 
 set_routing_mode:
-  target:
-    device:
-      integration: kramer
+  target: {}
   fields:
     mode:
       required: true

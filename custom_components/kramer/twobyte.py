@@ -222,7 +222,11 @@ class KramerTwoByteClient(KramerClient):
                 return
         else:
             value = spec.route_value(output, input_number)
-        await self._command(0x80 | value)
+        where = "all outputs" if output == 0 else f"output {output}"
+        await self._command(
+            0x80 | value,
+            "disconnecting " + where if input_number == 0 else f"setting {where} to input {input_number}",
+        )
         self._apply_route(output, input_number)
         self._notify()
 
@@ -239,7 +243,7 @@ class KramerTwoByteClient(KramerClient):
         if level not in self._audio_levels or level not in LEVEL_STEPS:
             raise KramerError(f"Level {level} dB is not available")
         code = LEVEL_BASE + (output - 1) * 4 + LEVEL_STEPS.index(level)
-        await self._command(code)
+        await self._command(code, f"setting the audio level of output {output} to {level} dB")
         self.levels = {**self.levels, output: level}
         self._notify()
 
@@ -255,8 +259,9 @@ class KramerTwoByteClient(KramerClient):
     # Request / reply plumbing
     # ------------------------------------------------------------------
 
-    async def _command(self, code: int) -> None:
-        """Send one command and wait for the unit's success reply."""
+    async def _command(self, code: int, what: str | None = None) -> None:
+        """Send one command and wait for the unit's success reply (``what`` says what it is for)."""
+        suffix = f" ({what})" if what else ""
         async with self._lock:
             writer = self._writer
             if writer is None or writer.is_closing():
@@ -277,10 +282,10 @@ class KramerTwoByteClient(KramerClient):
                     self._waiter = None
                 if reply == SUCCESS:
                     return
-                self._record_error("Unit reported: command not accepted")
-                raise KramerCommandError("Unit reported: command not accepted")
-        self._record_error("No reply from the unit")
-        raise KramerTimeoutError("No reply from the unit")
+                self._record_error(f"Unit reported: command not accepted{suffix}")
+                raise KramerCommandError(f"Unit reported: command not accepted{suffix}")
+        self._record_error(f"No reply from the unit{suffix}")
+        raise KramerTimeoutError(f"No reply from the unit{suffix}")
 
     async def _collect(self, count: int) -> list[int]:
         """Ask for the full status and gather its packets."""
@@ -303,8 +308,8 @@ class KramerTwoByteClient(KramerClient):
                     raise KramerConnectionError(str(err)) from err
                 finally:
                     self._collector = None
-        self._record_error("No reply from the unit")
-        raise KramerTimeoutError("No reply from the unit")
+        self._record_error("No reply from the unit (reading the routes)")
+        raise KramerTimeoutError("No reply from the unit (reading the routes)")
 
     def _fail_pending(self, error: Exception) -> None:
         for future in (self._waiter, self._collector[2] if self._collector else None):
@@ -379,7 +384,7 @@ class KramerTwoByteClient(KramerClient):
                     index = second - LEVEL_BASE
                     levels[index // 4 + 1] = LEVEL_STEPS[index % 4]
         if len(routes) != spec.outputs:
-            raise KramerCommandError("Unexpected status reply")
+            raise KramerCommandError("Unexpected status reply (reading the routes)")
         self.routes = routes
         self.audio_routes = {}
         self.levels = levels

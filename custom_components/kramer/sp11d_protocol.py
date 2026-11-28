@@ -28,18 +28,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 
 from .protocol import (
     FRONT_PANEL_BUSY_MESSAGE,
+    QUARANTINE_AFTER,
     KramerCommandError,
     KramerConnectionError,
     KramerTimeoutError,
     _close,
     _enable_keepalive,
+    say_name,
 )
 from .sp11d_defs import (
+    BY_FN,
     DETECTED_STANDARD_FN,
     OUTPUT_STANDARD_FN,
     PANEL_LOCK_FN,
@@ -47,6 +51,7 @@ from .sp11d_defs import (
     PRESET_FN,
     READ_FNS,
     firmware_text,
+    label,
     model_code_text,
 )
 
@@ -172,6 +177,10 @@ class Sp11dClient:
         self._writer: asyncio.StreamWriter | None = None
         self._lock = asyncio.Lock()
         self._pending: tuple[int, int | None, asyncio.Future] | None = None
+        self._heard: deque[str] = deque(maxlen=4)  # what the unit sent while a request waited
+        self._strikes: dict[int, int] = {}  # reads that got no answer, in a row
+        self.quarantined: set[int] = set()  # reads left out because they never get an answer
+        self.unmatched: dict[str, str] = {}  # what the unit said instead, by request
         self._listeners: list[Callable[[], None]] = []
         self._refresh_event = asyncio.Event()
         self._ready = asyncio.Event()
@@ -312,7 +321,12 @@ class Sp11dClient:
             wanted = int(value)
             if fn == OUTPUT_STANDARD_FN:
                 self._recall_seen.clear()
-            reply = await self._request(frame(WRITE, fn, wanted, self._address), WRITE, fn)
+            control = BY_FN.get(fn)
+            what = f"setting {say_name(control.name)}" if control else f"setting function {fn}"
+            if control is not None:
+                shown = label(control, wanted)
+                what += f" to {shown.lower() if shown in ('On', 'Off') else shown}" if shown else f" to {wanted}"
+            reply = await self._request(frame(WRITE, fn, wanted, self._address), WRITE, fn, what=what)
             applied = decode_value(*reply)
             self.values[fn] = applied
             if fn == OUTPUT_STANDARD_FN:
@@ -322,7 +336,7 @@ class Sp11dClient:
                 self._refresh_event.set()
             self._notify()
             if applied != wanted:
-                message = f"The device did not accept that value (it kept {applied})"
+                message = f"The device did not accept that value (it kept {applied}) ({what})"
                 self._record_error(message)
                 raise Sp11dCommandError(message)
 
@@ -333,7 +347,11 @@ class Sp11dClient:
         async with self._lock:
             self._recall_seen.clear()
             await self._request(
-                bytes([RECALL, 0x80, 0x80 | (preset - 1), self._address]), RECALL, None, retry=False
+                bytes([RECALL, 0x80, 0x80 | (preset - 1), self._address]),
+                RECALL,
+                None,
+                retry=False,
+                what=f"recalling preset {preset}",
             )
             self.async_request_refresh()
 
@@ -343,7 +361,11 @@ class Sp11dClient:
             raise Sp11dCommandError(f"There is no preset {preset}")
         async with self._lock:
             await self._request(
-                bytes([STORE, 0x80, 0x80 | (preset - 1), self._address]), RECALL, None, retry=False
+                bytes([STORE, 0x80, 0x80 | (preset - 1), self._address]),
+                RECALL,
+                None,
+                retry=False,
+                what=f"storing preset {preset}",
             )
             self.last_store = (preset, datetime.now(UTC))  # the unit acknowledged it
             self._notify()
@@ -368,7 +390,9 @@ class Sp11dClient:
             return await self._read_locked(fn)
 
     async def _read_locked(self, fn: int) -> int:
-        reply = await self._request(frame(READ, fn, 0, self._address), READ, fn)
+        control = BY_FN.get(fn)
+        what = f"reading {say_name(control.name)}" if control else f"reading function {fn}"
+        reply = await self._request(frame(READ, fn, 0, self._address), READ, fn, what=what)
         value = decode_value(*reply)
         self.values[fn] = value
         return value
@@ -380,26 +404,32 @@ class Sp11dClient:
         writer.write(data)
 
     async def _request(
-        self, data: bytes, instruction: int, key: int | None, *, retry: bool = True
+        self, data: bytes, instruction: int, key: int | None, *, retry: bool = True, what: str | None = None
     ) -> tuple[int, int]:
-        """Send one message and wait for its answer; returns the (value byte, address byte) of the reply."""
+        """Send one message and wait for its answer; returns the (value byte, address byte) of the reply.
+
+        ``what`` says in words what the message is for, and is added to the no-reply message.
+        """
+        suffix = f" ({what})" if what else ""
         attempts = 2 if retry else 1
         for attempt in range(attempts):
             loop = asyncio.get_running_loop()
             future: asyncio.Future = loop.create_future()
             self._pending = (instruction, key, future)
+            self._heard.clear()
             try:
                 self._send_bytes(data)
                 return await asyncio.wait_for(future, self._request_timeout)
             except TimeoutError as err:
                 if attempt + 1 >= attempts:
-                    raise KramerTimeoutError("No reply from the unit") from err
+                    self.unmatched[what or "request"] = " | ".join(self._heard) or "(nothing)"
+                    raise KramerTimeoutError(f"No reply from the unit{suffix}") from err
             except Sp11dBusyError as err:
                 self._record_error(str(err))
                 raise
             finally:
                 self._pending = None
-        raise KramerTimeoutError("No reply from the unit")  # pragma: no cover
+        raise KramerTimeoutError(f"No reply from the unit{suffix}")  # pragma: no cover
 
     # ------------------------------------------------------------------
     # Background task
@@ -481,13 +511,34 @@ class Sp11dClient:
     async def _refresh(self) -> None:
         """Read every parameter (and, once per connection, the unit's identity)."""
         timeouts = 0
+        answered = False  # the unit has answered something in this refresh, so it is alive
+        suspects: list[int] = []  # silent reads from before the first answer: they count once the unit proves alive
         async with self._lock:
             for fn in READ_FNS:
+                if self._strikes.get(fn, 0) >= QUARANTINE_AFTER:
+                    if fn not in self.quarantined:
+                        self.quarantined.add(fn)
+                        _LOGGER.warning(
+                            "The unit did not answer a read of function %d %d times in a row: leaving it out of the readings",
+                            fn,
+                            QUARANTINE_AFTER,
+                        )
+                    continue
                 try:
                     await self._read_locked(fn)
                     timeouts = 0
+                    for silent in suspects:
+                        self._strikes[silent] = self._strikes.get(silent, 0) + 1
+                    suspects.clear()
+                    answered = True
+                    self._strikes.pop(fn, None)
+                    self.quarantined.discard(fn)
                 except KramerTimeoutError:
                     timeouts += 1
+                    if answered:
+                        self._strikes[fn] = self._strikes.get(fn, 0) + 1
+                    else:
+                        suspects.append(fn)
                     if timeouts >= 3:
                         raise
             if self.firmware is None:
@@ -503,7 +554,9 @@ class Sp11dClient:
     async def _lock_panel(self) -> None:
         """Lock the front panel (the caller holds the lock); a refusal is only logged."""
         try:
-            reply = await self._request(frame(WRITE, PANEL_LOCK_FN, 1, self._address), WRITE, PANEL_LOCK_FN)
+            reply = await self._request(
+                frame(WRITE, PANEL_LOCK_FN, 1, self._address), WRITE, PANEL_LOCK_FN, what="locking the front panel"
+            )
         except Sp11dBusyError:
             raise
         except KramerTimeoutError:
@@ -522,7 +575,12 @@ class Sp11dClient:
             _LOGGER.debug("The unit did not answer the identify request")
 
     async def _identify(self, what: int) -> tuple[int, int]:
-        return await self._request(bytes([IDENTIFY, 0x80 | what, 0x80, self._address]), IDENTIFY, None)
+        return await self._request(
+            bytes([IDENTIFY, 0x80 | what, 0x80, self._address]),
+            IDENTIFY,
+            None,
+            what="reading the device identity",
+        )
 
     async def _read_loop(self, reader: asyncio.StreamReader) -> None:
         """Read messages until the connection closes."""
@@ -544,6 +602,8 @@ class Sp11dClient:
         instruction = first & 63
         param = param_byte & 127
         pending = self._pending
+        if pending and not pending[2].done():
+            self._heard.append(f"{first:02X} {param_byte:02X} {value_byte:02X} {address_byte:02X}")
         if instruction == BUSY:
             self._set_busy(True)
             if pending and not pending[2].done():

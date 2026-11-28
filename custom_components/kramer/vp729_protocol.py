@@ -35,15 +35,18 @@ import contextlib
 import logging
 import re
 import time
+from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 
 from .protocol import (
+    QUARANTINE_AFTER,
     KramerCommandError,
     KramerConnectionError,
     KramerTimeoutError,
     _close,
     _enable_keepalive,
+    say_name,
 )
 from .vp729_defs import (
     BY_FN,
@@ -91,6 +94,18 @@ class Vp729CommandError(KramerCommandError):
         """Keep the code with a readable message."""
         self.code = code
         super().__init__(message or f"Unit reported: {ERROR_TEXT.get(code, f'error {code}')}")
+
+
+def describe_command(fn: int, *, write: bool, value: int | None) -> str:
+    """Say in words what a command to function ``fn`` does ("reading brightness", "setting contrast to 40")."""
+    control = BY_FN.get(fn)
+    name = say_name(control.name) if control else f"function {fn}"
+    if not write:
+        return f"reading {name}"
+    if value is None:
+        return f"pressing {name}"
+    shown = control.options.get(value) if control and control.options else None
+    return f"setting {name} to {shown if shown is not None else value}"
 
 
 def parse_value(text: str | None) -> int | str | None:
@@ -187,6 +202,10 @@ class Vp729Client:
         self._writer: asyncio.StreamWriter | None = None
         self._lock = asyncio.Lock()
         self._pending: tuple[int, int, asyncio.Future] | None = None
+        self._heard: deque[str] = deque(maxlen=4)  # what the unit sent while a request waited
+        self._strikes: dict[int, int] = {}  # reads that got no answer, in a row
+        self.quarantined: set[int] = set()  # reads left out because they never get an answer
+        self.unmatched: dict[str, str] = {}  # what the unit said instead, by request
         self._listeners: list[Callable[[], None]] = []
         self._refresh_event = asyncio.Event()
         self._ready = asyncio.Event()
@@ -353,7 +372,7 @@ class Vp729Client:
             got = await self._verify(fn, value)
         if got != value:
             raise KramerCommandError(
-                f"The unit did not accept {value} for function {fn} (it still reads {got})"
+                f"The unit did not accept {value} ({describe_command(fn, write=True, value=value)}); it still reads {got}"
             )
         self.values[fn] = value
         self._after_change(fn)
@@ -469,6 +488,7 @@ class Vp729Client:
             command = f"Y 0 {fn}" + ("" if value is None else f" {value}")
         else:
             command = f"Y 1 {fn}"
+        what = describe_command(fn, write=write, value=value)
         delay = self._hold_until - time.monotonic()
         if delay > 0:
             await asyncio.sleep(min(delay, MAX_HOLD_WAIT))
@@ -477,18 +497,20 @@ class Vp729Client:
             raise KramerConnectionError("Not connected")
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending = (fn, 0 if write else 1, future)
+        self._heard.clear()
         self._prompt.clear()
         try:
             writer.write(f"{command}\r".encode("ascii"))
             await writer.drain()
             try:
                 reply = await asyncio.wait_for(future, timeout or self._request_timeout)
-            except Vp729CommandError:
+            except Vp729CommandError as err:
                 await self._pace()
-                raise
+                raise Vp729CommandError(err.code, f"{err} ({what})") from err
         except TimeoutError as err:
-            self._record_error(f"No reply to {command}")
-            raise KramerTimeoutError(f"No reply to {command}") from err
+            self.unmatched[what] = " | ".join(self._heard) or "(nothing)"
+            self._record_error(f"No reply to {command} ({what})")
+            raise KramerTimeoutError(f"No reply to {command} ({what})") from err
         except OSError as err:
             raise KramerConnectionError(str(err)) from err
         finally:
@@ -599,24 +621,42 @@ class Vp729Client:
 
     async def _refresh(self) -> None:
         """Read every readable function (in standby only the power function answers)."""
-        await self._read_into_state(POWER_FN)
-        if self.values.get(POWER_FN) == 0:
-            self._was_standby = True
-            self._set_available(True)
-            self._ready.set()
-            self._notify()
-            return
         timeouts = 0
-        for control in READABLE:
-            if control.fn == POWER_FN:
+        answered = False  # the unit has answered something in this refresh, so it is alive
+        suspects: list[int] = []  # silent reads from before the first answer: they count once the unit proves alive
+        for fn in [POWER_FN] + [control.fn for control in READABLE if control.fn != POWER_FN]:
+            if self._strikes.get(fn, 0) >= QUARANTINE_AFTER:
+                if fn not in self.quarantined:
+                    self.quarantined.add(fn)
+                    _LOGGER.warning(
+                        "The unit did not answer a read of function %d %d times in a row: leaving it out of the readings",
+                        fn,
+                        QUARANTINE_AFTER,
+                    )
                 continue
             try:
-                await self._read_into_state(control.fn)
+                await self._read_into_state(fn)
                 timeouts = 0
+                for silent in suspects:
+                    self._strikes[silent] = self._strikes.get(silent, 0) + 1
+                suspects.clear()
+                answered = True
+                self._strikes.pop(fn, None)
+                self.quarantined.discard(fn)
             except KramerTimeoutError:
                 timeouts += 1
+                if answered:
+                    self._strikes[fn] = self._strikes.get(fn, 0) + 1
+                else:
+                    suspects.append(fn)
                 if timeouts >= 3:
                     raise
+            if fn == POWER_FN and answered and self.values.get(POWER_FN) == 0:
+                self._was_standby = True
+                self._set_available(True)
+                self._ready.set()
+                self._notify()
+                return
         if not self.values:
             raise KramerTimeoutError("No reply from the unit")
         self._set_available(True)
@@ -652,6 +692,8 @@ class Vp729Client:
         _LOGGER.debug("Received %r", line)
         self.last_reply = datetime.now(UTC)
         pending = self._pending
+        if pending and not pending[2].done():
+            self._heard.append(line)
         error = _ERROR.match(line)
         if error:
             if pending and not pending[2].done():

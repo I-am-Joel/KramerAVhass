@@ -67,6 +67,7 @@ FRONT_PANEL_BUSY_MESSAGE = (
     "Press the flashing button again to cancel the entry, then try again."
 )
 BUSY_CODE = 3  # the error code a model answers with while a front-panel entry is waiting (see KramerClient)
+QUARANTINE_AFTER = 2  # a refresh read that got no answer this many times in a row is left out
 BUSY_INTERVAL = 3.0  # seconds between attempts while the device is waiting for a front-panel entry
 
 _PACKET_SIZE = 4
@@ -89,6 +90,17 @@ class KramerTimeoutError(KramerError):
 
 class KramerCommandError(KramerError):
     """The unit answered with an error packet."""
+
+
+def say_name(name: str) -> str:
+    """Put a setting's name in the middle of a sentence ("Brightness" becomes "brightness", "OSD timeout" is kept)."""
+    name = name.split(" (")[0]
+    return name if name[:2].isupper() else name[:1].lower() + name[1:]
+
+
+def _outputs_text(output: int) -> str:
+    """Say which output(s) in words (output 0 means every output)."""
+    return "all outputs" if output == 0 else f"output {output}"
 
 
 class KramerBusyError(KramerCommandError):
@@ -284,6 +296,11 @@ class KramerClient:
         self._writer: asyncio.StreamWriter | None = None
         self._lock = asyncio.Lock()
         self._pending: tuple[Callable[[Packet], bool], asyncio.Future] | None = None
+        self._pending_what: str | None = None
+        self._answers = 0  # replies received since the refresh began (shows the unit is alive)
+        self._strikes: dict[str, int] = {}  # refresh reads that got no answer, in a row
+        self.quarantined: set[str] = set()  # refresh reads left out because they never get an answer
+        self.unmatched: dict[str, str] = {}  # the last packet that was not the answer, by request
         self._listeners: list[Callable[[], None]] = []
         self._refresh_event = asyncio.Event()
         self._ready = asyncio.Event()
@@ -447,6 +464,11 @@ class KramerClient:
             build_packet(INSTR_SWITCH_VIDEO, input_number, output, self._machine),
             INSTR_SWITCH_VIDEO,
             lambda p: p.input == input_number and p.output == output,
+            what=(
+                f"disconnecting the video of {_outputs_text(output)}"
+                if input_number == 0
+                else f"setting the video of {_outputs_text(output)} to input {input_number}"
+            ),
         )
         self._apply_route(output, input_number)
         if self._supports_modes and self.mode == MODE_AFV:
@@ -467,6 +489,11 @@ class KramerClient:
             build_packet(INSTR_SWITCH_AUDIO, input_number, output, self._machine),
             INSTR_SWITCH_AUDIO,
             lambda p: p.input == input_number and p.output == output,
+            what=(
+                f"disconnecting the audio of {_outputs_text(output)}"
+                if input_number == 0
+                else f"setting the audio of {_outputs_text(output)} to input {input_number}"
+            ),
         )
         self._apply_audio_route(output, input_number)
         if self.mode == MODE_AFV:
@@ -484,6 +511,7 @@ class KramerClient:
         reply = await self._request(
             build_packet(INSTR_BREAKAWAY, 0, mode, self._machine),
             INSTR_BREAKAWAY,
+            what="setting the routing mode to " + ("Audio follows video" if mode == MODE_AFV else "breakaway"),
         )
         self.mode = reply.output
         if self.mode == MODE_AFV:
@@ -512,6 +540,7 @@ class KramerClient:
             build_packet(INSTR_SET_LEVEL, output, level, self._machine),
             INSTR_SET_LEVEL,
             lambda p: p.input == output,
+            what=f"setting the audio level of output {output} to {level} dB",
         )
         self.levels = {**self.levels, output: level}
         self._notify()
@@ -523,6 +552,7 @@ class KramerClient:
             build_packet(INSTR_LOCK_PANEL, value, 0, self._machine),
             INSTR_LOCK_PANEL,
             lambda p: p.input == value,
+            what="locking the front panel" if locked else "unlocking the front panel",
         )
         self.locked = locked
         self._notify()
@@ -538,12 +568,16 @@ class KramerClient:
         extra: Callable[[Packet], bool] | None = None,
         attempts: int = 2,
         quiet: bool = False,
+        what: str | None = None,
     ) -> Packet:
         """Send a packet and wait for the unit's reply to it.
 
         A quiet request is a question the unit may legitimately not answer
-        (feature detection), so a failure is not recorded as an error.
+        (feature detection), so a failure is not recorded as an error. ``what`` says in
+        words what the request was for ("reading the panel lock"), and is added to the
+        error messages.
         """
+        suffix = f" ({what})" if what else ""
         accepted = (instruction,) if isinstance(instruction, int) else instruction
 
         def matches(packet: Packet) -> bool:
@@ -561,6 +595,7 @@ class KramerClient:
                     raise KramerConnectionError("Not connected")
                 future: asyncio.Future = asyncio.get_running_loop().create_future()
                 self._pending = (matches, future)
+                self._pending_what = what
                 try:
                     writer.write(data)
                     await writer.drain()
@@ -588,15 +623,50 @@ class KramerClient:
                         if not quiet:
                             self._record_error(FRONT_PANEL_BUSY_MESSAGE)
                         raise KramerBusyError(FRONT_PANEL_BUSY_MESSAGE)
-                    message = f"Unit reported: {_ERROR_CODES.get(code, code)}"
+                    message = f"Unit reported: {_ERROR_CODES.get(code, code)}{suffix}"
                     if not quiet:
                         self._record_error(message)
                     raise KramerCommandError(message)
                 self._set_busy(False)
+                self._answers += 1
                 return reply
         if not quiet:
-            self._record_error("No reply from the unit")
-        raise KramerTimeoutError("No reply from the unit")
+            self._record_error(f"No reply from the unit{suffix}")
+        raise KramerTimeoutError(f"No reply from the unit{suffix}")
+
+    async def _read(
+        self,
+        key: str,
+        data: bytes,
+        instruction: int | tuple[int, ...],
+        extra: Callable[[Packet], bool] | None = None,
+        *,
+        what: str,
+        quiet: bool = False,
+    ) -> Packet | None:
+        """Ask for one value of the refresh; None if this read is being left out.
+
+        A read that gets no answer QUARANTINE_AFTER refreshes in a row is left out from then on
+        (and noted in the log and the diagnostics), so one question the unit never answers cannot
+        keep the whole unit unavailable. It only counts when the unit has answered something else
+        in the same refresh: a unit that is switched off answers nothing, and must stay unavailable.
+        """
+        if self._strikes.get(key, 0) >= QUARANTINE_AFTER:
+            if key not in self.quarantined:
+                self.quarantined.add(key)
+                _LOGGER.warning(
+                    "The unit did not answer %s %d times in a row: leaving it out of the readings", what, QUARANTINE_AFTER
+                )
+            return None
+        try:
+            reply = await self._request(data, instruction, extra, quiet=quiet, what=what)
+        except KramerTimeoutError:
+            if self._answers and not quiet:
+                self._strikes[key] = self._strikes.get(key, 0) + 1
+            raise
+        self._strikes.pop(key, None)
+        self.quarantined.discard(key)
+        return reply
 
     def _set_busy(self, busy: bool) -> None:
         """Note whether the device is waiting for a front-panel entry, telling listeners if that changed."""
@@ -702,9 +772,11 @@ class KramerClient:
             return
         self.last_reply = datetime.now(UTC)
         pending = self._pending
-        if pending and not pending[1].done() and pending[0](packet):
-            pending[1].set_result(packet)
-            return
+        if pending and not pending[1].done():
+            if pending[0](packet):
+                pending[1].set_result(packet)
+                return
+            self.unmatched[self._pending_what or "request"] = packet.hex()
         self._handle_event(packet)
 
     def _handle_event(self, packet: Packet) -> None:
@@ -775,21 +847,29 @@ class KramerClient:
 
     async def _refresh(self) -> None:
         """Read the whole state: every output, the mode and the lock."""
+        self._answers = 0
         routes: dict[int, int] = {}
         for output in range(1, self._outputs + 1):
-            reply = await self._request(
+            reply = await self._read(
+                f"video:{output}",
                 build_packet(INSTR_REQUEST_VIDEO_STATUS, 0, output, self._machine),
                 INSTR_REQUEST_VIDEO_STATUS,
+                what=f"reading the video route of output {output}",
             )
-            routes[output] = reply.output
+            if reply is not None:
+                routes[output] = reply.output
+        if not routes and self._outputs:
+            raise KramerTimeoutError("No reply from the unit (reading the video routes)")
 
         audio: dict[int, int] = {}
         if self._supports_modes and self.audio_supported is not False:
             for output in range(1, self._outputs + 1):
                 try:
-                    reply = await self._request(
+                    reply = await self._read(
+                        f"audio:{output}",
                         build_packet(INSTR_REQUEST_AUDIO_STATUS, 0, output, self._machine),
                         INSTR_REQUEST_AUDIO_STATUS,
+                        what=f"reading the audio route of output {output}",
                         quiet=self.audio_supported is not True and output == 1,
                     )
                 except (KramerCommandError, KramerTimeoutError):
@@ -801,8 +881,9 @@ class KramerClient:
                     self.audio_supported = False
                     audio = {}
                     break
-                audio[output] = reply.output
-                self.audio_supported = True
+                if reply is not None:
+                    audio[output] = reply.output
+                    self.audio_supported = True
 
         mode = self.mode
         if self._supports_modes:
@@ -810,17 +891,25 @@ class KramerClient:
                 reply = await self._request(
                     build_packet(INSTR_REQUEST_BREAKAWAY, 0, 0, self._machine),
                     INSTR_REQUEST_BREAKAWAY,
+                    what="reading the routing mode",
                 )
                 mode = reply.output
             except KramerCommandError:
                 _LOGGER.debug("Unit does not report its mode")
+            except KramerTimeoutError:
+                if not self._answers:
+                    raise  # nothing has answered: the unit is not there
+                # The unit answers the routes but not this: keep the last mode rather than lose the unit.
+                _LOGGER.debug("Unit did not answer the routing mode read; keeping the last mode")
 
         locked = self.locked
         if self.lock_supported is not False:
             try:
-                reply = await self._request(
+                reply = await self._read(
+                    "lock",
                     build_packet(INSTR_REQUEST_LOCK, 0, 0, self._machine),
                     INSTR_REQUEST_LOCK,
+                    what="reading the panel lock",
                     quiet=not self.lock_supported,
                 )
             except (KramerCommandError, KramerTimeoutError):
@@ -831,18 +920,21 @@ class KramerClient:
                 _LOGGER.debug("Unit does not report its lock state")
                 self.lock_supported = False
             else:
-                locked = reply.output == 1
-                self.lock_supported = True
+                if reply is not None:
+                    locked = reply.output == 1
+                    self.lock_supported = True
 
         levels = dict(self.levels)
         if self._audio_levels:
             for output in range(1, self._outputs + 1):
-                reply = await self._request(
+                reply = await self._read(
+                    f"level:{output}",
                     build_packet(INSTR_REQUEST_LEVEL, output, 0, self._machine),
                     INSTR_REQUEST_LEVEL,
                     lambda p, o=output: p.input == o,
+                    what=f"reading the audio level of output {output}",
                 )
-                if reply.output in self._audio_levels:
+                if reply is not None and reply.output in self._audio_levels:
                     levels[output] = reply.output
 
         self.routes = routes
@@ -861,7 +953,7 @@ class KramerClient:
 
     async def _identify(self, what: int, which: int) -> Packet:
         """Ask the identify instruction one question (see note 13 of the protocol document)."""
-        return await self._request(build_packet(INSTR_IDENTIFY, what, which, self._machine), INSTR_IDENTIFY, quiet=True)
+        return await self._request(build_packet(INSTR_IDENTIFY, what, which, self._machine), INSTR_IDENTIFY, quiet=True, what="reading the device identity")
 
     async def _read_identity(self) -> None:
         """Read the unit's name and software versions once per connection, if it answers.
@@ -934,6 +1026,7 @@ class KramerClient:
             build_packet(INSTR_REQUEST_DEFINED, slot, 0, self._machine),
             INSTR_REQUEST_DEFINED,
             lambda p: p.input == slot,
+            what=f"checking whether preset {slot} is filled",
         )
         return reply.output == 1
 
@@ -946,11 +1039,13 @@ class KramerClient:
             reply = await self._request(
                 build_packet(INSTR_REQUEST_VIDEO_STATUS, slot, output, self._machine),
                 INSTR_REQUEST_VIDEO_STATUS,
+                what=f"reading the video of output {output} in preset {slot}",
             )
             video[output] = reply.output
             reply = await self._request(
                 build_packet(INSTR_REQUEST_AUDIO_STATUS, slot, output, self._machine),
                 INSTR_REQUEST_AUDIO_STATUS,
+                what=f"reading the audio of output {output} in preset {slot}",
             )
             audio[output] = reply.output
         return PresetContents(video, audio)
@@ -967,6 +1062,7 @@ class KramerClient:
             build_packet(instruction, slot, 0, self._machine),
             instruction,
             lambda p: p.input == slot,
+            what=f"storing preset {slot}",
         )
         self.preset_defined[slot] = True
         self._notify()
@@ -981,5 +1077,6 @@ class KramerClient:
             build_packet(instruction, slot, 0, self._machine),
             (INSTR_RECALL_VIDEO, INSTR_RECALL_AUDIO),
             lambda p: p.input == slot,
+            what=f"recalling preset {slot}",
         )
         await self._refresh()

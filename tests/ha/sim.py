@@ -35,6 +35,8 @@ class Sim:
         self.has_lock = lock
         self.has_identify = identify
         self.has_audio_status = audio
+        self.mute = False  # answer nothing at all, as a unit that is switched off behind a bridge
+        self.deaf: set[tuple[int, int | None]] = set()  # (instruction, output) never answered; output None = any
         self.busy = False  # answer every command with error 3, as a unit with a flashing front-panel button does
         self.slots: dict[int, dict] = {}
         self.writers: list[asyncio.StreamWriter] = []
@@ -81,6 +83,8 @@ class Sim:
                 self.log.append(
                     p.build_packet(k.instruction, k.input, k.output, k.machine)
                 )
+                if self.mute or (k.instruction, k.output) in self.deaf or (k.instruction, None) in self.deaf:
+                    continue
                 for out in [self.error(3)] if self.busy else self.reply(k):
                     w.write(out)
                 await w.drain()
